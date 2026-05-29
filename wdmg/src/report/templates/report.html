@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1200,7 +1200,6 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     var rows = TX.filter(passes);
     lastRows = rows;
     var f = computeFlows(rows);
-    lastMonthly = f.monthly;
     renderCards(f);
     renderSpend(f, rows);
     renderIncome(f, rows);
