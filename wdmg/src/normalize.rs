@@ -29,6 +29,11 @@ struct TailRegexes {
     city_prov: Regex,
     /// Trailing bare store number when preceded by a space (e.g. `... C81432`).
     trailing_store_number: Regex,
+    /// A long (account-like) digit run jammed against a *following* letter
+    /// (`6881530CANADA` -> `6881530 CANADA`).
+    digits_then_letter: Regex,
+    /// A long digit run jammed against a *preceding* letter (`ABC6881530`).
+    letter_then_digits: Regex,
 }
 
 fn tail_regexes() -> &'static TailRegexes {
@@ -49,6 +54,16 @@ fn tail_regexes() -> &'static TailRegexes {
             .expect("static regex"),
             // A trailing alphanumeric store code like `C81432` after the merchant.
             trailing_store_number: Regex::new(r"\s+[A-Z]?\d{3,}\s*$").expect("static regex"),
+            // Account-number boundary normalization (>=5 digits, so years/small
+            // codes are untouched): a biller account number sometimes appears
+            // jammed against an adjacent word and sometimes spaced, e.g.
+            // "...TO 6881530CANADA" vs "...TO 6881530 CANADA" — the SAME payee.
+            // Inserting a boundary space collapses both to one merchant. The
+            // number is kept (so account-number category rules still match), only
+            // re-spaced. Applied AFTER the tail strips so it can't defeat the
+            // trailing-store-number strip.
+            digits_then_letter: Regex::new(r"(\d{5,})([A-Z])").expect("static regex"),
+            letter_then_digits: Regex::new(r"([A-Z])(\d{5,})").expect("static regex"),
         }
     })
 }
@@ -82,6 +97,14 @@ pub fn normalize_merchant(raw: &str, profile: &CompiledProfile) -> String {
     s = re.trailing_store_number.replace(&s, "").into_owned();
     s = re.star_token.replace(&s, "").into_owned();
     s = re.hash_number.replace(&s, "").into_owned();
+
+    // 6. Re-space account-like digit runs jammed against letters, so the same
+    //    payee written with/without a separating space collapses to one merchant.
+    s = re.digits_then_letter.replace_all(&s, "$1 $2").into_owned();
+    s = re.letter_then_digits.replace_all(&s, "$1 $2").into_owned();
+    // The boundary insertion can expose a now-trailing store number (e.g.
+    // "STORE 12345"); collapse any double spaces it introduced.
+    s = collapse_ws(&s);
 
     s.trim().to_string()
 }
@@ -154,6 +177,25 @@ mod tests {
         assert!(!out.contains("[CW]"));
         // Internal runs collapsed.
         assert!(!out.contains("  "));
+    }
+
+    #[test]
+    fn account_number_spacing_variants_collapse() {
+        // The same biller sometimes appears jammed ("6881530CANADA") and
+        // sometimes spaced ("6881530 CANADA") — both must normalize identically,
+        // and the account number is preserved (not stripped) so rules can match.
+        let p = profile("bank_ledger");
+        let a = normalize_merchant("EFT Withdrawal to 6881530CANADA", &p);
+        let b = normalize_merchant("EFT Withdrawal to 6881530 CANADA", &p);
+        assert_eq!(a, b, "spacing variants must collapse");
+        assert_eq!(a, "EFT WITHDRAWAL TO 6881530 CANADA");
+    }
+
+    #[test]
+    fn short_digit_runs_untouched() {
+        // <5-digit runs (years, small codes) are not re-spaced (e.g. 1PASSWORD).
+        let p = profile("bank_ledger");
+        assert_eq!(normalize_merchant("1PASSWORD", &p), "1PASSWORD");
     }
 
     #[test]

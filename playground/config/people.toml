@@ -1,0 +1,86 @@
+# where-did-money-go — PLAYGROUND household (Futurama-themed demo data)
+#
+# Fry & Leela run a joint household. Bender and the assorted creatures are
+# external counterparties. Accounts are matched to the generated exports by
+# cardholder / filename / profile.
+
+schema_version = 1
+
+[[person]]
+id = "fry"
+display_name = "Philip J. Fry"
+  # Mastercard with a cardholder column (fry_mastercard_7011.csv).
+  [[person.account]]
+  id = "Fry Mastercard"
+  cardholder = "FRY"
+  profile = "mastercard_credit"
+  kind = "credit_card"
+  # Rewards card (fry_rewards_7012.csv).
+  [[person.account]]
+  id = "Fry Rewards Card"
+  filename = "(?i)rewards"
+  profile = "rewards_credit"
+  kind = "credit_card"
+  # Joint chequing ledger (joint_chequing*.csv).
+  [[person.account]]
+  id = "Joint Chequing"
+  filename = "(?i)chequing"
+  profile = "bank_ledger"
+  kind = "debit"
+  # Joint savings ledger (joint_savings.csv).
+  [[person.account]]
+  id = "Joint Savings"
+  filename = "(?i)savings"
+  profile = "bank_ledger"
+  kind = "savings"
+
+[[person]]
+id = "leela"
+display_name = "Turanga Leela"
+  # Leela's first-bank card statement (leela_firstbank_7014.csv).
+  [[person.account]]
+  id = "Leela First Bank"
+  profile = "first_bank_card"
+  kind = "debit"
+
+[[person]]
+id = "bender"
+display_name = "Bender Rodríguez"
+  # External — Bender has no exports here, but is a transfer counterparty.
+  [[person.account]]
+  id = "bender_account"
+  external = true
+  kind = "other"
+
+# External investment accounts (declared, never sourced from a file).
+[[person]]
+id = "investments"
+display_name = "Investments"
+  [[person.account]]
+  id = "RRSP"
+  external = true
+  kind = "retirement"
+  [[person.account]]
+  id = "TFSA"
+  external = true
+  kind = "savings"
+
+# ---- Transfer counterparty assignment rules --------------------------------
+# Household e-transfers to Leela attribute to her. (Deliberately NO rule for the
+# owner's own name "Fry" — a counterparty is someone else; mapping it to yourself
+# creates "-> me" self-loops. e-transfers to outside creatures are shown grouped
+# by recipient in the report's "E-transfers" section with no rule needed.)
+[[transfer_rule]]
+pattern  = "(?i)e-?Transfer (To|From|Sent|Received):?\\s*LEELA"
+to       = "leela"
+priority = 10
+
+[[transfer_rule]]
+pattern  = "(?i)RRSP"
+to       = "RRSP"
+priority = 8
+
+[[transfer_rule]]
+pattern  = "(?i)TFSA"
+to       = "TFSA"
+priority = 8

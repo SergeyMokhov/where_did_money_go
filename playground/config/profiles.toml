@@ -1,0 +1,101 @@
+# where-did-money-go — PLAYGROUND source profiles
+#
+# Identical to the shipped defaults — the playground exports use the four standard
+# layouts. See assets/default_profiles.toml for full field documentation.
+
+schema_version = 1
+
+[[profile]]
+id = "mastercard_credit"
+[profile.match]
+header_first_cell = "Description"
+header_contains   = ["Card Holder Name", "Time"]
+[profile.date]
+column = "Date"
+format = "%m/%d/%Y"
+[profile.amount]
+column = "Amount"
+sign   = "signed"
+[profile.merchant]
+column = "Description"
+[profile.person]
+column = "Card Holder Name"
+[profile.type]
+column = "Type"
+map    = { PURCHASE = "spend", REFUND = "income", PAYMENT = "transfer" }
+[profile.account]
+kind     = "credit_card"
+currency = "CAD"
+id_from_filename = '(\d{4})'
+
+[[profile]]
+id = "rewards_credit"
+[profile.match]
+header_first_cell = "Transaction date"
+content_probe     = 'Rewards earned:.*Category:'
+[profile.date]
+column  = "Transaction date"
+formats = ["%m/%d/%Y", "%-m/%-d/%Y"]
+[profile.amount]
+column = "Amount"
+sign   = "signed"
+[profile.merchant]
+column = "Name"
+[profile.memo]
+column          = "Memo"
+category_harvest = 'Category:\s*(?P<cat>.+?)\s*$'
+[profile.type]
+column = "Transaction"
+map    = { DEBIT = "spend", CREDIT = "transfer" }
+[profile.account]
+kind     = "credit_card"
+currency = "CAD"
+id_from_filename = '(\d{4})'
+
+[[profile]]
+id = "bank_ledger"
+[profile.match]
+header_first_cell = "Date"
+header_contains   = ["Transaction", "Name", "Memo", "Amount"]
+[profile.date]
+column  = "Date"
+formats = ["%m/%d/%Y", "%-m/%-d/%Y"]
+[profile.amount]
+column = "Amount"
+sign   = "signed"
+[profile.merchant]
+column = "Name"
+[profile.memo]
+column = "Memo"
+[profile.type]
+column = "Transaction"
+map = { DEBIT = "spend", CREDIT = "income" }
+[profile.account]
+kind     = "debit"
+currency = "CAD"
+
+[[profile]]
+id = "first_bank_card"
+[profile.match]
+header_first_cell = "First Bank Card"
+[profile.encoding]
+has_bom = true
+[profile.layout]
+skip_blank_rows_after_header = 2
+[profile.date]
+column = "Date Posted"
+format = "%Y%m%d"
+[profile.amount]
+column = " Transaction Amount"
+sign   = "signed"
+[profile.merchant]
+column      = "Description"
+strip_codes = '^\s*\[(?:CW|PR|OP|RN|MP)\]\s*'
+trim        = "trailing_whitespace"
+[profile.type]
+column = "Transaction Type"
+map    = { DEBIT = "spend", CREDIT = "income" }
+[profile.account]
+kind     = "debit"
+currency = "CAD"
+id_from_filename = '(\d{4})'

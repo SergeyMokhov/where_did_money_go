@@ -98,6 +98,22 @@ recommendations section.
 > `analyze` reads the CSV files **directly in `--input`**, not nested subfolders. Point it at
 > the specific folder you want, or run it per folder.
 
+### One command, no LLM
+
+To go straight from a folder of exports to a report with **no Claude / no LLM involved** at
+all (pure deterministic pipeline: build → analyze → report), use the wrapper:
+
+```bash
+scripts/report.sh --input /path/to/exports
+# -> writes /path/to/exports/wdmg-report/report.html (printed on the last line)
+```
+
+It builds the binary if needed, seeds an editable default config the first time, analyzes,
+and renders. Optional flags: `--config <dir>` (your tuned `categories.toml`/`people.toml`;
+defaults are written if absent) and `--out <dir>` (default `<input>/wdmg-report`). Edit the
+config and re-run to refine. Everything in the report is complete except the LLM-authored
+**Recommendations** narrative.
+
 ---
 
 ## How configuration works
@@ -222,6 +238,15 @@ a **"money between your accounts & people"** section (matched transfers, money s
 external accounts, and a flow graph), recurring/subscriptions, anomalies, trends, per-person
 and per-account breakdowns, recommendations (from `insights.json`), top merchants, and a
 dedup/provenance footer. There is a light/dark toggle. No network is ever contacted.
+
+**Slice and dice.** A sticky filter bar lets you narrow the whole report by **person,
+account, category, kind**, a **month range**, and a merchant search — and *every*
+visualization and table (the headline cards, cash-flow chart, category/income breakdowns,
+recurring/anomalies/trends, the per-person/-account tables, top merchants, and the transfer
+graph) recomputes live to respect the active filter. The Rust engine remains the single
+source of truth: it embeds each transaction's exact decimal amount in the report, and the
+browser re-aggregates in integer cents, so a filtered slice is as exact as the full total
+(the unfiltered view reproduces the engine's figures to the cent).
 
 ---
 

@@ -370,11 +370,12 @@ mod tests {
     }
 
     #[test]
-    fn gas_requires_minimum_amount() {
+    fn gas_has_no_amount_gate() {
         let c = Categorizer::new(&cfg().categories);
-        // SHELL with $5 is below the 20.00 Gas minimum -> not Gas.
+        // Gas is intentionally ungated: a small pay-at-pump top-up and a full
+        // fill-up both land in Gas (see default_categories.toml rationale).
         let small = c.assign(&txn("SHELL", "-5.00", TxnType::Spend));
-        assert_ne!(small.subcategory.as_deref(), Some("Gas"));
+        assert_eq!(small.subcategory.as_deref(), Some("Gas"));
         let big = c.assign(&txn("SHELL", "-60.00", TxnType::Spend));
         assert_eq!(big.subcategory.as_deref(), Some("Gas"));
     }

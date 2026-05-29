@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::categorize::{Assignment, EffectiveKind};
 use crate::error::AnalyticsError;
-use crate::model::{Currency, Transaction};
+use crate::model::{Currency, Money, Transaction};
 
 /// A transaction paired with its categorization, the unit analytics operates on.
 #[derive(Debug, Clone, Copy)]
@@ -63,6 +63,46 @@ pub struct Period {
     pub end: Option<String>,
 }
 
+/// A compact, per-transaction record embedded in `analysis.json` so the HTML
+/// report can slice-and-dice (filter by person / account / category / month /
+/// kind) and recompute every aggregate **client-side** from the same exact,
+/// Rust-emitted figures. Money stays an exact decimal string (never f64); the
+/// browser sums in integer cents so the unfiltered view matches Rust exactly.
+///
+/// This carries only fields needed for filtering and aggregation — no memo,
+/// cardholder, or source-file provenance — keeping the island lean.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportTxn {
+    /// ISO `YYYY-MM-DD`.
+    pub date: String,
+    /// Calendar-month key `YYYY-MM` (precomputed for convenient client grouping).
+    pub month: String,
+    /// Signed amount (negative = outflow), exact decimal string.
+    pub amount: Money,
+    /// Effective accounting kind: `spend` | `income` | `transfer` | `unknown`.
+    pub kind: String,
+    /// Top-level category label (`"Uncategorized"` when none).
+    pub category: String,
+    /// Subcategory label (`"Uncategorized"` when none).
+    pub subcategory: String,
+    /// Normalized merchant string.
+    pub merchant: String,
+    /// Resolved owner person id (`"unassigned"` when none).
+    pub person: String,
+    /// Resolved account id (`"unassigned"` when none).
+    pub account: String,
+}
+
+/// Stable string tag for an [`EffectiveKind`], matching the client filter values.
+fn kind_tag(kind: EffectiveKind) -> &'static str {
+    match kind {
+        EffectiveKind::Spend => "spend",
+        EffectiveKind::Income => "income",
+        EffectiveKind::Transfer => "transfer",
+        EffectiveKind::Unknown => "unknown",
+    }
+}
+
 /// The computed analytics, minus transfers/dedup/review which the emit phase
 /// assembles from [`crate::reconcile`] and the review queue.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +130,10 @@ pub struct Analytics {
     pub by_person: Vec<flows::EntityBreakdown>,
     /// Spend/income/net by resolved account.
     pub by_account: Vec<flows::EntityBreakdown>,
+    /// Every (non-deduped) transaction in a compact form, so the report can
+    /// filter and recompute aggregates client-side. Includes transfers and
+    /// unknowns (with their `kind`) so the browser can replicate the Rust rules.
+    pub transactions: Vec<ReportTxn>,
 }
 
 /// Verify all transactions share one currency; return it, or a typed error
@@ -138,10 +182,40 @@ pub fn compute(items: &[Categorized<'_>], currency: &Currency) -> Analytics {
         flows::by_category(&flow_items, EffectiveKind::Income, &flows.total_inflow);
     let top_merchants = flows::top_merchants(&flow_items, 20);
     let recurring = recurring::detect(&flow_items);
-    let anomalies = anomaly::detect(&flow_items);
+    // Recurring/subscription merchants are excluded from single-transaction
+    // anomaly detection — a stable repeated charge is not an anomaly.
+    let recurring_merchants: std::collections::BTreeSet<String> =
+        recurring.iter().map(|r| r.merchant.clone()).collect();
+    let anomalies = anomaly::detect(&flow_items, &recurring_merchants);
     let trends = trends::compute(&flow_items);
     let by_person = flows::by_person(&flow_items);
     let by_account = flows::by_account(&flow_items);
+
+    // Per-transaction export for the client-side filter. Built from ALL items
+    // (transfers/unknowns included, tagged by kind) in the deterministic order
+    // the pipeline produced, so re-runs stay byte-identical.
+    let transactions: Vec<ReportTxn> = items
+        .iter()
+        .map(|c| ReportTxn {
+            date: c.txn.date.to_string(),
+            month: month_key(c.txn.date),
+            amount: c.txn.amount,
+            kind: kind_tag(c.assignment.kind).to_string(),
+            category: c.category_label().to_string(),
+            subcategory: c.subcategory_label().to_string(),
+            merchant: c.txn.normalized_merchant.clone(),
+            person: c
+                .txn
+                .owner_person
+                .clone()
+                .unwrap_or_else(|| "unassigned".into()),
+            account: c
+                .txn
+                .account_id
+                .clone()
+                .unwrap_or_else(|| "unassigned".into()),
+        })
+        .collect();
 
     Analytics {
         period,
@@ -155,6 +229,7 @@ pub fn compute(items: &[Categorized<'_>], currency: &Currency) -> Analytics {
         trends,
         by_person,
         by_account,
+        transactions,
     }
 }
 

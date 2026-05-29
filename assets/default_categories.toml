@@ -13,8 +13,19 @@
 #               payments, transfers between your accounts/people). Never counted
 #               as spend or income, and fed to transfer reconciliation.
 #
-# LLM-learned rules are NOT written here; they live in learned.toml (same schema)
-# and are layered as: user categories.toml > learned.toml > these defaults.
+# These defaults are generic (real, public merchant brands and place names — not
+# anyone's personal data). Tune them to your own statements in your private
+# config; the most-specific-match rule means you can add narrow overrides without
+# touching these. LLM-learned rules are NOT written here; they live in
+# learned.toml (same schema), layered as: user categories.toml > learned.toml >
+# these defaults.
+#
+# Findings baked in from real statements:
+#  - no amount gate on Gas (pay-at-pump fill-ups under $20 should still count);
+#  - the broad "EFT Withdrawal to" / "EFT Deposit from" patterns are deliberately
+#    NOT transfers — many banks label bill payments (mortgage, utilities, tax) and
+#    benefit deposits that way, so treating them as transfers hides real spend and
+#    income. Add a narrow transfer rule for your own inter-account EFTs if needed.
 
 schema_version = 1
 
@@ -23,24 +34,23 @@ name = "Car"
 kind = "spend"
   [[category.subcategory]]
   name = "Gas"
-  patterns = ["SHELL", "ESSO", "PETRO[- ]?EARTH", "ULTRAMAR", "HUSKY", "MACEWEN", "QUICKIE", "PIONEER", "CIRCLE K", "COUCHE[- ]?TARD"]
-  amount_min = "20.00"
+  patterns = ["SHELL", "ESSO", "PETRO[- ]?CANADA", "ULTRAMAR", "HUSKY", "MACEWEN", "QUICKIE", "PIONEER", "CIRCLE K", "COUCHE[- ]?TARD"]
   [[category.subcategory]]
   name = "Parking"
   patterns = ["PARKING", "INDIGO", "IMPARK", "PRECISE PARK", "GREEN P", "PARC INDIGO"]
   [[category.subcategory]]
   name = "Maintenance & Parts"
-  patterns = ["TIRE DEPOT", "MR LUBE", "JIFFY LUBE", "KAL TIRE", "AUTO", "PARTSOURCE", "MIDAS"]
+  patterns = ["CANADIAN TIRE", "TOYOTA", "HONDA", "PNEU", "MR LUBE", "JIFFY LUBE", "KAL TIRE", "PARTSOURCE", "MIDAS", "AUTO"]
   [[category.subcategory]]
   name = "Insurance"
-  patterns = ["INSURANCE", "BELAIRDIRECT", "INTACT", "TD INSURANCE"]
+  patterns = ["INSURANCE", "BELAIR", "BELAIRDIRECT", "INTACT", "TD INSURANCE"]
 
 [[category]]
 name = "Groceries"
 kind = "spend"
   [[category.subcategory]]
   name = "Groceries"
-  patterns = ["COSTCO", "FARM BOY", "LOBLAW", "WALMART", "SOBEYS", "METRO", "FOOD BASICS", "NO FRILLS", "FRESHCO", "INDEPENDENT", "T&T", "FARMBOY", "SUPERSTORE"]
+  patterns = ["COSTCO", "FARM BOY", "FARMBOY", "LOBLAW", "WAL-?MART", "WMT", "SOBEYS", "METRO", "FOOD BASICS", "NO FRILLS", "FRESHCO", "INDEPENDENT", "T&T", "SUPERSTORE", "STOLICHNI"]
 
 [[category]]
 name = "Takeout & Restaurants"
@@ -54,7 +64,7 @@ kind = "spend"
   patterns = ["MCDONALD", "A&W", "BURGER KING", "WENDY", "SUBWAY", "KFC", "POPEYES", "TACO BELL", "PIZZA", "HARVEY"]
   [[category.subcategory]]
   name = "Restaurants"
-  patterns = ["RESTAURANT", "GRILL", "BISTRO", "SUSHI", "THAI", "PHO", "KITCHEN", "BAR & ", "PUB", "DINER", "EATERY", "SQ \\*", "DOORDASH", "UBER EATS", "SKIPTHEDISHES"]
+  patterns = ["RESTAURANT", "GRILL", "BISTRO", "SUSHI", "THAI", "PHO", "KITCHEN", "PUB", "DINER", "EATERY", "TRATTORIA", "MILESTONES", "MOXIE'?S", "MACLAREN'?S", "JOEY ", "EARLS", "THE KEG", "BOSTON PIZZA", "TST-", "SQ \\*", "DOORDASH", "UBER EATS", "SKIPTHEDISHES"]
 
 [[category]]
 name = "Taxi & Rides"
@@ -70,13 +80,16 @@ name = "Indulgence"
 kind = "spend"
   [[category.subcategory]]
   name = "Entertainment"
-  patterns = ["CINEPLEX", "CINEMA", "MOVIE", "TICKETMASTER", "EVENTBRITE", "SPORTS", "STUBHUB"]
+  patterns = ["CINEPLEX", "CINEMA", "MOVIE", "TICKETMASTER", "EVENTBRITE", "STUBHUB"]
   [[category.subcategory]]
   name = "Alcohol & Cannabis"
   patterns = ["LCBO", "BEER STORE", "WINE", "LIQUOR", "CANNABIS", "OCS", "TOKYO SMOKE", "SUPERETTE"]
   [[category.subcategory]]
   name = "Travel"
-  patterns = ["AIR EARTH", "WESTJET", "EXPEDIA", "AIRBNB", "BOOKING.COM", "HOTEL", "FLAIR", "PORTER"]
+  patterns = ["AIR CANADA", "WESTJET", "SUNWING", "EXPEDIA", "AIRBNB", "BOOKING.COM", "HOTEL", "RESORT", "FLAIR", "PORTER"]
+  [[category.subcategory]]
+  name = "Gifts & Jewellery"
+  patterns = ["PEOPLES JEWELLERS", "BRILLIANT EARTH", "PARTY CITY", "FLORAL", "FLOWERS"]
   [[category.subcategory]]
   name = "Lottery & Gaming"
   patterns = ["OLG", "LOTTERY", "CASINO"]
@@ -93,14 +106,14 @@ name = "Pets"
 kind = "spend"
   [[category.subcategory]]
   name = "Pet Supplies & Vet"
-  patterns = ["PETSMART", "PET VALU", "REN'S PETS", "VET", "ANIMAL HOSPITAL", "PET "]
+  patterns = ["PETSMART", "PET VALU", "REN'S PETS", "PETLINE", "VET", "ANIMAL HOSPITAL", "PET "]
 
 [[category]]
 name = "Subscriptions"
 kind = "spend"
   [[category.subcategory]]
   name = "Digital Subscriptions"
-  patterns = ["APPLE.COM/BILL", "NETFLIX", "SPOTIFY", "1PASSWORD", "DISNEY", "AMAZON PRIME", "YOUTUBEPREMIUM", "GOOGLE \\*", "OPENAI", "ANTHROPIC", "CRAVE", "PATREON"]
+  patterns = ["APPLE.COM/BILL", "APPLE.COM/CA", "NETFLIX", "SPOTIFY", "1PASSWORD", "DISNEY", "AMAZON PRIME", "YOUTUBEPREMIUM", "GOOGLE \\*", "OPENAI", "ANTHROPIC", "CRAVE", "PATREON"]
 
 [[category]]
 name = "Self-care"
@@ -113,7 +126,11 @@ kind = "spend"
   patterns = ["SHOPPERS DRUG", "PHARMA", "REXALL", "DENTAL", "DENTIST", "CLINIC", "PHYSIO"]
   [[category.subcategory]]
   name = "Clothing"
-  patterns = ["WINNERS", "MARSHALLS", "H&M", "UNIQLO", "GAP", "OLD NAVY", "ZARA", "LULULEMON", "SPORTING LIFE"]
+  # "\\bALDO\\b" (word-bounded) so the short brand doesn't match inside longer words.
+  patterns = ["WINNERS", "MARSHALLS", "H&M", "UNIQLO", "GAP", "OLD NAVY", "ZARA", "LULULEMON", "SPORTING LIFE", "MOORES", "\\bALDO\\b"]
+  [[category.subcategory]]
+  name = "Tattoo & Body Art"
+  patterns = ["TATTOO", "PIERCING", "BODY ART"]
 
 [[category]]
 name = "Online Shopping"
@@ -121,29 +138,47 @@ kind = "spend"
   [[category.subcategory]]
   name = "Online Marketplaces"
   patterns = ["AMAZON", "AMZN", "ALIEXPRESS", "SHEIN", "WAYFAIR", "EBAY", "ETSY", "TEMU", "PAYPAL"]
+  [[category.subcategory]]
+  name = "Electronics"
+  patterns = ["APPLE STORE", "BEST BUY", "THE SOURCE", "CANADA COMPUTERS"]
 
 [[category]]
 name = "Home & Utilities"
 kind = "spend"
   [[category.subcategory]]
   name = "Telecom"
-  patterns = ["ROGERS", "BELL", "TELUS", "FIDO", "FREEDOM MOBILE", "KOODO", "TEKSAVVY", "INTERNET"]
+  patterns = ["ROGERS", "BELL", "TELUS", "FIDO", "FREEDOM MOBILE", "KOODO", "TEKSAVVY", "VIRGIN PLUS", "EBOX", "NUMBERBARN", "INTERNET"]
   [[category.subcategory]]
   name = "Utilities"
-  patterns = ["HYDRO", "POWER", "WATERWORKS", "UTILIT", "WATER", "GAS CO"]
+  patterns = ["HYDRO", "ENBRIDGE", "WATERWORKS", "UTILIT", "WATER", "POWER"]
   [[category.subcategory]]
   name = "Government & Tax"
-  patterns = ["CITY OF", "DOOP", "EARTHGOV", "TAX", "GOVERNMENT"]
+  patterns = ["CITY OF", "CRA", "SERVICE ONTARIO", "IMMIGRATION", "TAX", "GOVERNMENT"]
+  [[category.subcategory]]
+  name = "Furniture & Home"
+  patterns = ["THE BRICK", "IKEA", "HOMESENSE", "STRUCTUBE", "LEONS", "WAYFAIR"]
   [[category.subcategory]]
   name = "Rent & Mortgage"
-  patterns = ["MORTGAGE", "RENT", "PROPERTY MGMT"]
+  patterns = ["MORTGAGE", "RENT", "PROPERTY MGMT", "PROPERTY MANAGEMENT"]
+  priority = 5
 
 [[category]]
 name = "Income"
 kind = "income"
   [[category.subcategory]]
   name = "Salary"
-  patterns = ["Deposit from PLANET EXPRESS", "PAYROLL", "PAY/PAYE", "DIRECT DEPOSIT", "SALARY"]
+  patterns = ["PAYROLL", "PAY/PAYE", "DIRECT DEPOSIT", "SALARY"]
+  [[category.subcategory]]
+  name = "Rent Income"
+  # Rent RECEIVED (e.g. from a tenant) — income, not spending. Longer than the
+  # bare "RENT" spend pattern, so it wins for deposits labelled this way.
+  patterns = ["RENT DEPOSIT", "RENT FROM", "RENT INCOME", "RENT RECEIVED"]
+  [[category.subcategory]]
+  name = "Cheque Deposit"
+  patterns = ["CHEQUE DEPOSIT", "MOBILE CHEQUE DEPOSIT", "CHEQUE-IN DEPOSIT", "ESTATE OF", "INHERITANCE"]
+  [[category.subcategory]]
+  name = "Health Benefits"
+  patterns = ["BLUE CROSS", "MEDAVIE", "BENECAID", "SUN LIFE", "MANULIFE"]
   [[category.subcategory]]
   name = "Refunds & Rebates"
   patterns = ["REFUND", "REBATE", "CASHBACK"]
@@ -156,9 +191,24 @@ name = "Transfers"
 kind = "transfer"
   [[category.subcategory]]
   name = "Credit Card Payment"
-  patterns = ["PAYMENT - THANK YOU", "BILL PAYMENT", "MASTERCARD PAYMENT", "VISA PAYMENT", "CREDIT CARD PAYMENT"]
+  patterns = ["PAYMENT - THANK YOU", "BILL PAYMENT", "MASTERCARD PAYMENT", "VISA PAYMENT", "CREDIT CARD PAYMENT", "M/C-"]
   priority = 10
   [[category.subcategory]]
+  name = "Savings & Investments"
+  # Moving money into your own savings/retirement accounts — not spending.
+  patterns = ["RRSP", "TFSA", "TO SAVINGS", "SAVINGS TRANSFER"]
+  priority = 8
+  [[category.subcategory]]
+  name = "ATM & Cash"
+  # ATM/ABM cash withdrawals & deposits are a conversion to/from physical cash,
+  # not spend or income. "\\bABM\\b"/"\\bATM\\b" are word-bounded so the short
+  # tokens don't match inside merchant names (e.g. ATMOSPHERE).
+  patterns = ["\\bABM\\b", "\\bATM\\b", "CASH WITHDRAWAL", "ATM WITHDRAWAL"]
+  priority = 6
+  [[category.subcategory]]
   name = "Internal / E-Transfer"
-  patterns = ["INTERAC e-Transfer To", "INTERAC e-Transfer From", "INTERAC ETRNSFR", "EFT Withdrawal to", "EFT Deposit from", "Transfer to", "Transfer from", "e-Transfer"]
+  # NOTE: the broad "EFT Withdrawal to" / "EFT Deposit from" patterns are NOT here
+  # on purpose — many banks label bills/benefits that way; matching them as
+  # transfers would hide real spend/income. Add a narrow rule for your own EFTs.
+  patterns = ["INTERAC e-Transfer To", "INTERAC e-Transfer From", "INTERAC ETRNSFR", "Transfer to", "Transfer from", "e-Transfer"]
   priority = 5

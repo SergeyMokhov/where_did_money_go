@@ -8,6 +8,9 @@ insights.json
 learned.toml
 report.html
 
+# Playground: generated demo data (the generator + config are the source of truth)
+/playground/data/
+
 # Editor / OS cruft
 *.swp
 .DS_Store

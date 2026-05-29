@@ -1,8 +1,12 @@
 //! Anomaly detection — two complementary, robust methods.
 //!
 //! - `mad_zscore`: a single transaction whose magnitude is a robust outlier
-//!   within its category, `|x - median| / (1.4826 * MAD) > 3.5`. Robust because
-//!   the median/MAD are not dragged by the very outlier being detected.
+//!   within its **subcategory**, `|x - median| / (1.4826 * MAD) > 3.5`. Robust
+//!   because the median/MAD are not dragged by the very outlier being detected.
+//!   Scoped per subcategory (not the broad category) so like is compared with
+//!   like — a $50 oil change is not "anomalous" against a pool of $16 gas
+//!   fill-ups. Known **recurring/subscription** merchants are excluded: a stable
+//!   repeated charge (rent, telecom, Netflix) is the opposite of an anomaly.
 //! - `monthly_iqr`: a whole month whose category spend exceeds `Q3 + 1.5*IQR` of
 //!   that category's monthly history — distinguishing one big purchase from a
 //!   broadly expensive month.
@@ -11,7 +15,7 @@
 //! [`super::stats`]). Each anomaly carries its `method`, `baseline`, and a
 //! `severity` (the z-score, or the overage ratio over the IQR fence).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rust_decimal::dec;
 use rust_decimal::prelude::ToPrimitive;
@@ -47,10 +51,14 @@ pub struct Anomaly {
 }
 
 /// Detect anomalies among spend items.
+///
+/// `recurring_merchants` is the set of normalized-merchant names already flagged
+/// as recurring/subscription; their transactions are excluded from the
+/// single-transaction outlier pass (a stable repeated charge is not an anomaly).
 #[must_use]
-pub fn detect(items: &[Categorized<'_>]) -> Vec<Anomaly> {
+pub fn detect(items: &[Categorized<'_>], recurring_merchants: &BTreeSet<String>) -> Vec<Anomaly> {
     let mut out = Vec::new();
-    out.extend(mad_zscore_anomalies(items));
+    out.extend(mad_zscore_anomalies(items, recurring_merchants));
     out.extend(monthly_iqr_anomalies(items));
     // Deterministic ordering: method, category, period/date, then amount.
     out.sort_by(|a, b| {
@@ -63,16 +71,26 @@ pub fn detect(items: &[Categorized<'_>]) -> Vec<Anomaly> {
     out
 }
 
-/// Per-category single-transaction MAD z-score outliers.
-fn mad_zscore_anomalies(items: &[Categorized<'_>]) -> Vec<Anomaly> {
-    // category -> Vec<(magnitude, date, merchant)>
-    let mut by_cat: BTreeMap<String, Vec<(Decimal, jiff::civil::Date, String)>> = BTreeMap::new();
+/// Per-subcategory single-transaction MAD z-score outliers.
+///
+/// Pools are scoped per subcategory (not the broad category) so the median/MAD
+/// describe like-for-like spend; transactions from `recurring_merchants` are
+/// skipped so a stable repeated charge does not get flagged on every occurrence.
+fn mad_zscore_anomalies(
+    items: &[Categorized<'_>],
+    recurring_merchants: &BTreeSet<String>,
+) -> Vec<Anomaly> {
+    // subcategory -> Vec<(magnitude, date, merchant)>
+    let mut by_sub: BTreeMap<String, Vec<(Decimal, jiff::civil::Date, String)>> = BTreeMap::new();
     for c in items {
         if c.assignment.kind != EffectiveKind::Spend {
             continue;
         }
-        by_cat
-            .entry(c.category_label().to_string())
+        if recurring_merchants.contains(&c.txn.normalized_merchant) {
+            continue;
+        }
+        by_sub
+            .entry(c.subcategory_label().to_string())
             .or_default()
             .push((
                 c.txn.amount.amount().abs(),
@@ -82,7 +100,7 @@ fn mad_zscore_anomalies(items: &[Categorized<'_>]) -> Vec<Anomaly> {
     }
 
     let mut out = Vec::new();
-    for (category, rows) in by_cat {
+    for (subcategory, rows) in by_sub {
         if rows.len() < 4 {
             // Too few points for a meaningful robust estimate.
             continue;
@@ -101,7 +119,7 @@ fn mad_zscore_anomalies(items: &[Categorized<'_>]) -> Vec<Anomaly> {
                 if z > Z_THRESHOLD {
                     out.push(Anomaly {
                         method: "mad_zscore".into(),
-                        category: category.clone(),
+                        category: subcategory.clone(),
                         period_or_date: date.to_string(),
                         amount: Money::new(*mag),
                         baseline: Money::new(med),
@@ -175,10 +193,16 @@ mod tests {
     use jiff::civil::{date, Date};
     use std::str::FromStr;
 
-    fn spend(cat: &str, amount: &str, d: Date) -> (Transaction, Assignment) {
+    fn spend_full(
+        cat: &str,
+        sub: &str,
+        merchant: &str,
+        amount: &str,
+        d: Date,
+    ) -> (Transaction, Assignment) {
         let t = Transaction {
-            raw_description: "M".into(),
-            normalized_merchant: "M".into(),
+            raw_description: merchant.into(),
+            normalized_merchant: merchant.into(),
             date: d,
             time: None,
             amount: Money::from_str(amount).unwrap(),
@@ -195,11 +219,28 @@ mod tests {
         };
         let a = Assignment {
             category: Some(cat.into()),
-            subcategory: Some("S".into()),
+            subcategory: Some(sub.into()),
             kind: EffectiveKind::Spend,
             needs_review: false,
         };
         (t, a)
+    }
+
+    // Default merchant "M", default subcategory "S" — most tests only vary amount.
+    fn spend(cat: &str, amount: &str, d: Date) -> (Transaction, Assignment) {
+        spend_full(cat, "S", "M", amount, d)
+    }
+    fn spend_sub(cat: &str, sub: &str, amount: &str, d: Date) -> (Transaction, Assignment) {
+        spend_full(cat, sub, "M", amount, d)
+    }
+    fn spend_named(
+        cat: &str,
+        sub: &str,
+        merchant: &str,
+        amount: &str,
+        d: Date,
+    ) -> (Transaction, Assignment) {
+        spend_full(cat, sub, merchant, amount, d)
     }
 
     fn view<'a>(p: &'a [(Transaction, Assignment)]) -> Vec<Categorized<'a>> {
@@ -209,6 +250,10 @@ mod tests {
                 assignment: a,
             })
             .collect()
+    }
+
+    fn no_recurring() -> BTreeSet<String> {
+        BTreeSet::new()
     }
 
     #[test]
@@ -222,11 +267,56 @@ mod tests {
             pairs.push(spend("Groceries", a, date(2026, 1, (i + 1) as i8)));
         }
         pairs.push(spend("Groceries", "-5000.00", date(2026, 1, 15)));
-        let a = detect(&view(&pairs));
+        let a = detect(&view(&pairs), &no_recurring());
         assert!(a
             .iter()
             .any(|x| x.method == "mad_zscore"
                 && x.amount.amount() == rust_decimal_macros::dec!(5000.00)));
+    }
+
+    /// A pricey-but-normal item in its own subcategory must not be flagged just
+    /// because it dwarfs a different, cheaper subcategory in the same category.
+    #[test]
+    fn subcategory_scoping_avoids_cross_subcategory_false_positive() {
+        let mut pairs = vec![];
+        // Many small "Gas" charges (subcategory S1) ...
+        for i in 1..=10 {
+            pairs.push(spend_sub("Car", "S1", "-16.00", date(2026, 1, i)));
+        }
+        // ... and a handful of larger, steady "Maintenance" charges (subcategory S2).
+        let maint = ["-180.00", "-200.00", "-190.00", "-210.00", "-195.00"];
+        for (i, a) in maint.iter().enumerate() {
+            pairs.push(spend_sub("Car", "S2", a, date(2026, 2, (i + 1) as i8)));
+        }
+        let a = detect(&view(&pairs), &no_recurring());
+        // Pooled per subcategory, none of the maintenance charges are outliers.
+        assert!(
+            !a.iter().any(|x| x.method == "mad_zscore"),
+            "no single-txn anomaly expected, got: {a:?}"
+        );
+    }
+
+    /// A stable recurring merchant must not be flagged on every occurrence.
+    #[test]
+    fn excludes_recurring_merchant() {
+        let mut pairs = vec![];
+        // Small, varied subcategory baseline so MAD is non-zero.
+        let base = ["-20.00", "-25.00", "-22.00", "-28.00", "-24.00"];
+        for (i, amt) in base.iter().enumerate() {
+            pairs.push(spend_named("Bills", "S", "CORNER STORE", amt, date(2026, 1, (i + 1) as i8)));
+        }
+        // A big, *recurring* mortgage in the same subcategory, every month.
+        for m in 1..=6i8 {
+            pairs.push(spend_named("Bills", "S", "RMG MTG", "-950.00", date(2026, m, 1)));
+        }
+        let mut recurring = BTreeSet::new();
+        recurring.insert("RMG MTG".to_string());
+        let a = detect(&view(&pairs), &recurring);
+        assert!(
+            !a.iter()
+                .any(|x| x.method == "mad_zscore" && x.merchant.as_deref() == Some("RMG MTG")),
+            "recurring merchant should be excluded, got: {a:?}"
+        );
     }
 
     #[test]
@@ -241,7 +331,7 @@ mod tests {
         for d in 1..=10 {
             pairs.push(spend("Groceries", "-300.00", date(2026, 5, d)));
         }
-        let a = detect(&view(&pairs));
+        let a = detect(&view(&pairs), &no_recurring());
         assert!(a
             .iter()
             .any(|x| x.method == "monthly_iqr" && x.period_or_date == "2026-05"));
@@ -253,6 +343,6 @@ mod tests {
         for i in 1..=10 {
             pairs.push(spend("Groceries", "-50.00", date(2026, 1, i)));
         }
-        assert!(detect(&view(&pairs)).is_empty());
+        assert!(detect(&view(&pairs), &no_recurring()).is_empty());
     }
 }

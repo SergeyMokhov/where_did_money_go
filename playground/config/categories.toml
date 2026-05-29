@@ -1,0 +1,116 @@
+# where-did-money-go — PLAYGROUND categories (Futurama-themed demo data)
+#
+# Tuned to the merchants emitted by generate_data.py. Most-specific (longest)
+# matching pattern wins, then priority, then order. Unanchored, case-insensitive.
+
+schema_version = 1
+
+[[category]]
+name = "Car"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Gas"
+  patterns = ["PLASMA FUEL", "PETRO-?EARTH", "FUEL DEPOT"]
+
+[[category]]
+name = "Groceries"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Groceries"
+  patterns = ["SLURM MART", "FISHY JOE", "BUY N LARGE", "MOMCORP MART"]
+
+[[category]]
+name = "Takeout & Restaurants"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Coffee"
+  patterns = ["CAFE 3000", "COFFEE", "CAFE"]
+  amount_max = "20.00"
+  [[category.subcategory]]
+  name = "Restaurants"
+  patterns = ["ELZAR", "PANUCCI", "JACKRABBIT", "DINER", "RESTAURANT", "PIZZA"]
+
+[[category]]
+name = "Indulgence"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Travel"
+  patterns = ["MARS VEGAS", "RESORT", "SPACE CRUISE"]
+  [[category.subcategory]]
+  name = "Gifts & Jewellery"
+  patterns = ["WONG INDUSTRIES", "JEWELLERS"]
+
+[[category]]
+name = "Subscriptions"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Digital Subscriptions"
+  patterns = ["HYPNOTOAD", "SLURMSTREAM", "EYEPHONE PLUS"]
+  [[category.subcategory]]
+  name = "Fitness"
+  patterns = ["BENDING GYM", "GYM"]
+
+[[category]]
+name = "Self-care"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Clothing"
+  patterns = ["WINNERS", "MARSHALLS"]
+
+[[category]]
+name = "Online Shopping"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Online Marketplaces"
+  patterns = ["MOMAZON", "AMAZON"]
+  [[category.subcategory]]
+  name = "Electronics"
+  patterns = ["NIMBUS ELECTRONICS"]
+
+[[category]]
+name = "Home & Utilities"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Telecom"
+  patterns = ["MOMCORP MOBILE"]
+  [[category.subcategory]]
+  name = "Utilities"
+  patterns = ["DOOP HYDRO", "HYDRO", "EARTH WATER", "WATER"]
+  [[category.subcategory]]
+  name = "Rent & Mortgage"
+  patterns = ["RENT", "ROBOT ARMS"]
+  priority = 5
+
+[[category]]
+name = "Income"
+kind = "income"
+  [[category.subcategory]]
+  name = "Salary"
+  patterns = ["PLANET EXPRESS PAYROLL", "PAYROLL", "DIRECT DEPOSIT"]
+  [[category.subcategory]]
+  name = "Rent Income"
+  # "RENT DEPOSIT" / "RENT FROM" are longer than the bare "RENT" spend pattern,
+  # so rent RECEIVED from a tenant is correctly counted as income.
+  patterns = ["RENT DEPOSIT", "RENT FROM"]
+  [[category.subcategory]]
+  name = "Inheritance & Cheques"
+  patterns = ["ESTATE OF", "INHERITANCE", "CHEQUE DEPOSIT"]
+  [[category.subcategory]]
+  name = "Interest"
+  patterns = ["INTEREST PAID", "INTEREST"]
+
+[[category]]
+name = "Transfers"
+kind = "transfer"
+  [[category.subcategory]]
+  name = "Credit Card Payment"
+  patterns = ["PAYMENT - THANK YOU", "BILL PAYMENT", "MASTERCARD", "VISA PAYMENT"]
+  priority = 10
+  [[category.subcategory]]
+  name = "Savings & Investments"
+  patterns = ["TRANSFER TO SAVINGS", "RRSP", "TFSA"]
+  priority = 8
+  [[category.subcategory]]
+  name = "Internal / E-Transfer"
+  patterns = ["INTERAC E-TRANSFER", "INTERAC ETRNSFR", "E-TRANSFER", "TRANSFER TO", "TRANSFER FROM"]
+  priority = 5
