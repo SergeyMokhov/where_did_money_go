@@ -1,0 +1,84 @@
+# where-did-money-go — household identity & transfer ownership (TEMPLATE)
+#
+# Models WHO owns each card/account, and WHERE transferred money goes — including
+# external accounts (e.g. a savings account) that never appear in the exports.
+# Edit by hand or via:  wdmg add-person / assign-account / assign-transfer
+#
+# This shipped file is a generic, themed TEMPLATE. Replace the people and the
+# account matchers to match your own exports (your real, private config should
+# live outside any repo, e.g. ~/.config/wdmg/people.toml).
+#
+# An account is matched to a transaction by any combination of:
+#   cardholder = exact value of the profile's person column (case-insensitive)
+#   card_last4 = last-4 captured by the profile's account.id_from_filename
+#   filename   = regex on the source file basename (use when a shared-header ledger
+#                — chequing vs savings — is only distinguishable by filename)
+#   profile    = restrict the match to a specific profile id
+#
+# External accounts (external = true) hold no transactions of their own but are
+# valid transfer DESTINATIONS, so money sent to them is shown as movement, not spend.
+
+schema_version = 1
+
+[[person]]
+id = "me"
+display_name = "Philip J. Fry"
+  [[person.account]]
+  # The card export that carries a cardholder column, matched by that name.
+  id = "mastercard_credit"
+  cardholder = "FRY"
+  profile = "mastercard_credit"
+  kind = "credit_card"
+  [[person.account]]
+  # A card export named by its last-4 in the filename.
+  id = "card_7002"
+  filename = "(?i)7002"
+  kind = "credit_card"
+  [[person.account]]
+  # Chequing ledger, distinguished from savings by filename.
+  id = "ledger_debit"
+  filename = "(?i)debit"
+  profile = "bank_ledger"
+  kind = "debit"
+  [[person.account]]
+  # Savings ledger (same columns as chequing; filename disambiguates).
+  id = "rewards_savings"
+  filename = "(?i)rewards"
+  profile = "bank_ledger"
+  kind = "savings"
+
+[[person]]
+id = "spouse"
+display_name = "Turanga Leela"
+  [[person.account]]
+  id = "first_bank"
+  profile = "first_bank_card"
+  kind = "debit"
+  # External — declared but never sourced from a file. Transfers to it are tracked.
+  [[person.account]]
+  id = "spouse_savings"
+  external = true
+  kind = "savings"
+
+# ---- Transfer counterparty assignment rules ---------------------------------
+# When a transfer's description matches `pattern`, attribute the *other leg* to
+# this person/account. Matched top-to-bottom by descending `priority` then order.
+# Unmatched transfer counterparties are surfaced in the review queue for the host
+# agent to assign (auto-apply confident, confirm low-confidence). LLM-learned
+# assignments are written to learned.toml, not here.
+
+[[transfer_rule]]
+pattern  = "(?i)e-Transfer (To|From):?\\s*Leela|LEELA"
+to       = "spouse"
+priority = 10
+
+[[transfer_rule]]
+pattern  = "(?i)e-Transfer (To|From):?\\s*Fry|FRY"
+to       = "me"
+priority = 10
+
+[[transfer_rule]]
+# Money moved out to a savings account that isn't in the exports.
+pattern  = "(?i)(Withdrawal to|Transfer to).*(SAVINGS|TFSA|RRSP)"
+to       = "spouse_savings"
+priority = 5

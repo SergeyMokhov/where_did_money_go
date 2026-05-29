@@ -1,0 +1,4 @@
+[general]
+# Report templates live alongside the report module rather than in a top-level
+# `templates/` dir, so the module is self-contained.
+dirs = ["src/report/templates"]

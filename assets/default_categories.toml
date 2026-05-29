@@ -1,0 +1,164 @@
+# where-did-money-go — categories
+#
+# Categorization assigns each transaction to the (category, subcategory) whose
+# pattern match is MOST SPECIFIC (longest matching pattern, then highest
+# `priority`, then config order). Patterns are case-insensitive, UNANCHORED
+# regexes matched against the normalized merchant string. amount_min/amount_max
+# are exact decimals written as strings.
+#
+# `kind`:
+#   spend    -> counted as outflow / spending
+#   income   -> counted as inflow / income
+#   transfer -> netted out of BOTH flows (moving your own money: credit-card
+#               payments, transfers between your accounts/people). Never counted
+#               as spend or income, and fed to transfer reconciliation.
+#
+# LLM-learned rules are NOT written here; they live in learned.toml (same schema)
+# and are layered as: user categories.toml > learned.toml > these defaults.
+
+schema_version = 1
+
+[[category]]
+name = "Car"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Gas"
+  patterns = ["SHELL", "ESSO", "PETRO[- ]?EARTH", "ULTRAMAR", "HUSKY", "MACEWEN", "QUICKIE", "PIONEER", "CIRCLE K", "COUCHE[- ]?TARD"]
+  amount_min = "20.00"
+  [[category.subcategory]]
+  name = "Parking"
+  patterns = ["PARKING", "INDIGO", "IMPARK", "PRECISE PARK", "GREEN P", "PARC INDIGO"]
+  [[category.subcategory]]
+  name = "Maintenance & Parts"
+  patterns = ["TIRE DEPOT", "MR LUBE", "JIFFY LUBE", "KAL TIRE", "AUTO", "PARTSOURCE", "MIDAS"]
+  [[category.subcategory]]
+  name = "Insurance"
+  patterns = ["INSURANCE", "BELAIRDIRECT", "INTACT", "TD INSURANCE"]
+
+[[category]]
+name = "Groceries"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Groceries"
+  patterns = ["COSTCO", "FARM BOY", "LOBLAW", "WALMART", "SOBEYS", "METRO", "FOOD BASICS", "NO FRILLS", "FRESHCO", "INDEPENDENT", "T&T", "FARMBOY", "SUPERSTORE"]
+
+[[category]]
+name = "Takeout & Restaurants"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Coffee"
+  patterns = ["STARBUCKS", "TIM HORTONS", "SECOND CUP", "BRIDGEHEAD", "COFFEE", "CAFE"]
+  amount_max = "20.00"
+  [[category.subcategory]]
+  name = "Fast Food"
+  patterns = ["MCDONALD", "A&W", "BURGER KING", "WENDY", "SUBWAY", "KFC", "POPEYES", "TACO BELL", "PIZZA", "HARVEY"]
+  [[category.subcategory]]
+  name = "Restaurants"
+  patterns = ["RESTAURANT", "GRILL", "BISTRO", "SUSHI", "THAI", "PHO", "KITCHEN", "BAR & ", "PUB", "DINER", "EATERY", "SQ \\*", "DOORDASH", "UBER EATS", "SKIPTHEDISHES"]
+
+[[category]]
+name = "Taxi & Rides"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Rideshare"
+  # "UBER EATS" lives in Restaurants; since the most-specific (longest) match wins,
+  # a bare "UBER" here only catches rides, not Uber Eats.
+  patterns = ["LYFT", "UBER", "TURO", "U-HAUL", "UHAUL", "TAXI"]
+
+[[category]]
+name = "Indulgence"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Entertainment"
+  patterns = ["CINEPLEX", "CINEMA", "MOVIE", "TICKETMASTER", "EVENTBRITE", "SPORTS", "STUBHUB"]
+  [[category.subcategory]]
+  name = "Alcohol & Cannabis"
+  patterns = ["LCBO", "BEER STORE", "WINE", "LIQUOR", "CANNABIS", "OCS", "TOKYO SMOKE", "SUPERETTE"]
+  [[category.subcategory]]
+  name = "Travel"
+  patterns = ["AIR EARTH", "WESTJET", "EXPEDIA", "AIRBNB", "BOOKING.COM", "HOTEL", "FLAIR", "PORTER"]
+  [[category.subcategory]]
+  name = "Lottery & Gaming"
+  patterns = ["OLG", "LOTTERY", "CASINO"]
+
+[[category]]
+name = "Construction & Hardware"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Hardware"
+  patterns = ["HOME DEPOT", "HOME HARDWARE", "RONA", "LOWE", "PRINCESS AUTO", "DOLLARAMA", "BUSY BEE"]
+
+[[category]]
+name = "Pets"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Pet Supplies & Vet"
+  patterns = ["PETSMART", "PET VALU", "REN'S PETS", "VET", "ANIMAL HOSPITAL", "PET "]
+
+[[category]]
+name = "Subscriptions"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Digital Subscriptions"
+  patterns = ["APPLE.COM/BILL", "NETFLIX", "SPOTIFY", "1PASSWORD", "DISNEY", "AMAZON PRIME", "YOUTUBEPREMIUM", "GOOGLE \\*", "OPENAI", "ANTHROPIC", "CRAVE", "PATREON"]
+
+[[category]]
+name = "Self-care"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Grooming"
+  patterns = ["BARBER", "SALON", "NAILS", "SPA", "HAIR"]
+  [[category.subcategory]]
+  name = "Health & Pharmacy"
+  patterns = ["SHOPPERS DRUG", "PHARMA", "REXALL", "DENTAL", "DENTIST", "CLINIC", "PHYSIO"]
+  [[category.subcategory]]
+  name = "Clothing"
+  patterns = ["WINNERS", "MARSHALLS", "H&M", "UNIQLO", "GAP", "OLD NAVY", "ZARA", "LULULEMON", "SPORTING LIFE"]
+
+[[category]]
+name = "Online Shopping"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Online Marketplaces"
+  patterns = ["AMAZON", "AMZN", "ALIEXPRESS", "SHEIN", "WAYFAIR", "EBAY", "ETSY", "TEMU", "PAYPAL"]
+
+[[category]]
+name = "Home & Utilities"
+kind = "spend"
+  [[category.subcategory]]
+  name = "Telecom"
+  patterns = ["ROGERS", "BELL", "TELUS", "FIDO", "FREEDOM MOBILE", "KOODO", "TEKSAVVY", "INTERNET"]
+  [[category.subcategory]]
+  name = "Utilities"
+  patterns = ["HYDRO", "POWER", "WATERWORKS", "UTILIT", "WATER", "GAS CO"]
+  [[category.subcategory]]
+  name = "Government & Tax"
+  patterns = ["CITY OF", "DOOP", "EARTHGOV", "TAX", "GOVERNMENT"]
+  [[category.subcategory]]
+  name = "Rent & Mortgage"
+  patterns = ["MORTGAGE", "RENT", "PROPERTY MGMT"]
+
+[[category]]
+name = "Income"
+kind = "income"
+  [[category.subcategory]]
+  name = "Salary"
+  patterns = ["Deposit from PLANET EXPRESS", "PAYROLL", "PAY/PAYE", "DIRECT DEPOSIT", "SALARY"]
+  [[category.subcategory]]
+  name = "Refunds & Rebates"
+  patterns = ["REFUND", "REBATE", "CASHBACK"]
+  [[category.subcategory]]
+  name = "Other Income"
+  patterns = ["Deposit from", "INTERAC e-Transfer From"]
+
+[[category]]
+name = "Transfers"
+kind = "transfer"
+  [[category.subcategory]]
+  name = "Credit Card Payment"
+  patterns = ["PAYMENT - THANK YOU", "BILL PAYMENT", "MASTERCARD PAYMENT", "VISA PAYMENT", "CREDIT CARD PAYMENT"]
+  priority = 10
+  [[category.subcategory]]
+  name = "Internal / E-Transfer"
+  patterns = ["INTERAC e-Transfer To", "INTERAC e-Transfer From", "INTERAC ETRNSFR", "EFT Withdrawal to", "EFT Deposit from", "Transfer to", "Transfer from", "e-Transfer"]
+  priority = 5

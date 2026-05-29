@@ -1,0 +1,13 @@
+# Rust build artifacts
+/wdmg/target/
+
+# Generated working-dir artifacts (should never live in the repo)
+analysis.json
+review_queue.json
+insights.json
+learned.toml
+report.html
+
+# Editor / OS cruft
+*.swp
+.DS_Store
