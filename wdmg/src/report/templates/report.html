@@ -1,0 +1,1273 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>where-did-money-go — report</title>
+<style>{{ uplot_css|safe }}</style>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1c2230; --muted:#6b7280; --line:#e6e8ec;
+  --pos:#10915a; --neg:#c2384b; --accent:#3b6ea5; --chip:#eef2f7;
+  --bar:#3b6ea5; --bar2:#9bb8d6;
+}
+html[data-theme="dark"]{
+  --bg:#11151c; --panel:#171c25; --ink:#e7ebf2; --muted:#9aa3b2; --line:#262d39;
+  --pos:#3fc98a; --neg:#ff6b81; --accent:#6fa8dc; --chip:#1e2530;
+  --bar:#6fa8dc; --bar2:#33506e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  font-size:15px;line-height:1.5;}
+.wrap{max-width:1440px;width:100%;margin:0 auto;padding:24px 20px 80px;}
+header.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;}
+h1{font-size:22px;margin:0;letter-spacing:-.01em;}
+h2{font-size:17px;margin:28px 0 12px;letter-spacing:-.01em;}
+.sub{color:var(--muted);font-size:13px;}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:14px;}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;}
+.card .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+.card .v{font-size:22px;font-weight:600;margin-top:4px;font-variant-numeric:tabular-nums;}
+/* Inline "ⓘ" help icon with a hover/focus tooltip explaining each section. */
+.help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+  border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:700;font-style:normal;
+  cursor:help;position:relative;flex:none;align-self:center;line-height:1;letter-spacing:0;text-transform:none;}
+.help::after{content:attr(data-tip);position:absolute;left:0;top:calc(100% + 8px);
+  width:max-content;max-width:330px;background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;padding:9px 11px;font-size:12.5px;font-weight:400;line-height:1.5;
+  box-shadow:0 8px 24px rgba(0,0,0,.28);opacity:0;visibility:hidden;transition:opacity .12s;
+  z-index:40;white-space:normal;text-align:left;pointer-events:none;}
+.help:hover::after,.help:focus::after{opacity:1;visibility:visible;}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+.muted{color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);font-size:14px;}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em;}
+td.num,th.num{text-align:right;}
+.bars{display:flex;flex-direction:column;gap:7px;}
+.barrow{display:grid;grid-template-columns:minmax(220px,1.1fr) 2fr minmax(150px,auto);align-items:center;gap:12px;}
+.barrow .lbl{overflow-wrap:anywhere;line-height:1.25;}
+.barrow .amt{white-space:nowrap;}
+.bartrack{background:var(--chip);border-radius:6px;height:18px;overflow:hidden;}
+.barfill{height:100%;background:var(--bar);border-radius:6px;}
+.barrow .amt{text-align:right;font-variant-numeric:tabular-nums;}
+/* hierarchical category → subcategory view */
+.catgroup{padding:8px 0;border-bottom:1px solid var(--line);}
+.catgroup:last-child{border-bottom:none;}
+.cathead{cursor:pointer;border-radius:8px;}
+.cathead:hover{background:var(--chip);}
+.cathead .lbl{font-weight:600;}
+.caret{display:inline-block;width:12px;color:var(--muted);font-size:10px;transition:transform .12s;}
+.catgroup.collapsed .caret{transform:rotate(-90deg);}
+.catgroup.collapsed .subrows{display:none;}
+.bartrack.stacked{display:flex;gap:1px;}
+.bartrack.stacked .seg{height:100%;min-width:1px;}
+.subrows{margin-top:6px;display:flex;flex-direction:column;gap:5px;padding-left:14px;}
+.barrow.sub .lbl{font-weight:400;color:var(--muted);font-size:13px;}
+.barrow.sub .bartrack{height:12px;}
+.chips{display:flex;gap:6px;flex-wrap:wrap;}
+.btn{background:var(--chip);border:1px solid var(--line);color:var(--ink);border-radius:8px;
+  padding:5px 11px;font-size:13px;cursor:pointer;}
+.btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.rec{border-left:3px solid var(--accent);padding:10px 14px;margin:10px 0;background:var(--chip);border-radius:0 8px 8px 0;}
+.rec .t{font-weight:600;}
+.rec .save{color:var(--pos);font-weight:600;}
+.tag{display:inline-block;background:var(--chip);border:1px solid var(--line);border-radius:999px;
+  padding:1px 9px;font-size:12px;color:var(--muted);}
+.sev-high{color:var(--neg);font-weight:600;} .sev-medium{color:#c98a00;} .sev-low{color:var(--muted);}
+#cashflow-chart{width:100%;}
+.empty{color:var(--muted);font-style:italic;padding:6px 0;}
+.flow svg{max-width:100%;height:auto;display:block;}
+.flow .edge{stroke:var(--bar2);stroke-width:1.5px;fill:none;opacity:.5;transition:stroke .1s,stroke-width .1s,opacity .1s;}
+.flow .edge-hit{stroke:transparent;stroke-width:16px;fill:none;cursor:pointer;}
+.flow .edge-g:hover .edge,.flow .edge-g.sel .edge{stroke:var(--accent);stroke-width:4px;opacity:1;}
+.flow .amt{fill:var(--muted);font-size:11px;pointer-events:none;transition:fill .1s;}
+.flow .edge-g:hover .amt,.flow .edge-g.sel .amt{fill:var(--accent);font-weight:700;}
+.flow-legend{color:var(--muted);font-size:12px;margin-top:6px;}
+/* collapsible sub-sections (e.g. transfer tables) */
+.collapsible{margin-top:14px;}
+.collapse-head{font-size:14px;margin:0;padding:6px 8px;border-radius:8px;cursor:pointer;user-select:none;
+  display:flex;align-items:center;gap:6px;background:var(--chip);}
+.collapse-head:hover{filter:brightness(0.98);}
+.collapse-body{margin-top:6px;}
+.collapsible.collapsed .collapse-body{display:none;}
+.collapsible.collapsed .collapse-head .caret{transform:rotate(-90deg);}
+/* whole-section (h2) collapse toggles */
+h2.sec-h{cursor:pointer;user-select:none;display:flex;align-items:baseline;gap:8px;}
+h2.sec-h .caret{font-size:11px;color:var(--muted);transition:transform .12s;}
+h2.sec-h.closed .caret{transform:rotate(-90deg);}
+.panel.sec-closed{display:none;}
+.footer{margin-top:36px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:12px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media(max-width:720px){.grid2{grid-template-columns:1fr}.barrow{grid-template-columns:minmax(120px,1.3fr) 2fr auto;gap:8px;}}
+.summary{background:var(--chip);border-radius:10px;padding:14px 16px;margin-top:8px;}
+
+/* ---- Filter bar ---- */
+.filterbar{position:sticky;top:0;z-index:40;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:10px 12px;margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.filterbar .fb-label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;}
+.facet{position:relative;}
+.facet>.facet-btn{white-space:nowrap;}
+.facet-btn .cnt{opacity:.8;}
+.facet-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:200px;max-height:280px;overflow:auto;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:50;}
+.facet.open>.facet-menu{display:block;}
+.facet-menu label{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;font-size:13px;cursor:pointer;white-space:nowrap;}
+.facet-menu label:hover{background:var(--chip);}
+.facet-menu .mini{display:flex;gap:6px;margin-bottom:6px;}
+.facet-menu .mini a{font-size:12px;color:var(--accent);cursor:pointer;text-decoration:underline;}
+.filterbar select,.filterbar input[type=text]{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;padding:5px 8px;font-size:13px;}
+.filterbar input[type=text]{min-width:140px;}
+.activebar{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-height:0;}
+.activebar .pill{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#fff;border-radius:999px;
+  padding:2px 6px 2px 10px;font-size:12px;}
+.activebar .pill b{font-weight:600;}
+.activebar .pill .x{cursor:pointer;font-weight:700;opacity:.85;}
+.activebar .pill .x:hover{opacity:1;}
+.scope-note{color:var(--muted);font-size:12px;font-style:italic;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Where did money go?</h1>
+      <div class="sub">
+        <span id="period-sub">
+          {% if let Some(s) = analysis.analytics.period.start %}{{ s }}{% endif %}
+          {% if let Some(e) = analysis.analytics.period.end %} → {{ e }}{% endif %}
+        </span>
+        · {{ analysis.analytics.currency }}
+      </div>
+    </div>
+    <button class="btn" id="theme-toggle" type="button">◐ Theme</button>
+  </header>
+
+  {% if has_insights %}
+    {% if let Some(sum) = insights.summary %}
+    <div class="summary">{{ sum }}</div>
+    {% endif %}
+  {% endif %}
+
+  <!-- Filter bar (populated by the glue script from the transaction island) -->
+  <div class="filterbar" id="filterbar"></div>
+  <div class="activebar" id="activebar"></div>
+
+  <!-- Headline numbers -->
+  <div class="cards" id="cards"></div>
+
+  <!-- Cash flow over time -->
+  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. The chart picks its own resolution — daily, weekly or monthly — so a short window still shows fine detail (the label by the buttons tells you which). The dashed line is a rolling-average baseline. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
+  <div class="panel">
+    <div class="chips" id="range-buttons" style="margin-bottom:10px;">
+      <button class="btn active" data-range="all" type="button">All</button>
+      <button class="btn" data-range="12" type="button">12 mo</button>
+      <button class="btn" data-range="ytd" type="button">YTD</button>
+      <span id="cashflow-res" class="muted" style="font-size:12px;align-self:center;margin-left:4px;"></span>
+    </div>
+    <div id="cashflow-chart"></div>
+    <div class="muted" style="font-size:12px;margin-top:6px;">Tip: drag across the chart to filter every section to that date range.</div>
+    <div class="empty" id="cashflow-empty" style="display:none;">No data in the current selection.</div>
+  </div>
+
+  <div class="grid2">
+    <!-- Spend by category -->
+    <div>
+      <h2 class="sec-h">Where it went <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Your spending grouped by category; each bar is split into its subcategories. Longer bar = more spent. Click a category to expand its breakdown. What to watch: the one or two categories that dominate — that's where small cuts add up fastest.">i</span></h2>
+      <div class="panel"><div class="bars" id="spend-bars"></div></div>
+    </div>
+
+    <!-- Income by source -->
+    <div>
+      <h2 class="sec-h">Where it came from <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Where your money came in from, by source. What to watch: how much you rely on a single source, and any one-off inflows (a refund, a sale, an inheritance) that won't repeat next month.">i</span></h2>
+      <div class="panel" id="income-panel"></div>
+    </div>
+  </div>
+
+  <!-- Money between accounts/people -->
+  <h2 class="sec-h">Money between your accounts &amp; people <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money you moved between your own accounts and to/from other people — this is neither spending nor income, so it's netted out of the totals above (moving your own cash isn't spending). Arrows show direction; thicker line = more money. Click a line to highlight it.">i</span></h2>
+  <div class="panel" id="transfers-panel"></div>
+
+  <!-- E-transfers by recipient -->
+  <h2 class="sec-h">E-transfers — who you paid &amp; who paid you <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Interac e-transfers grouped by the person you sent to or received from — even when no rule names them, the recipient is read from the description. Use it to see who you paid, when, and how much.">i</span></h2>
+  <div class="panel" id="etransfers-panel"></div>
+
+  <!-- Recurring / subscriptions -->
+  <h2 class="sec-h">Recurring &amp; subscriptions <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Charges that repeat on a regular cadence (weekly / monthly / yearly) with a stable amount — subscriptions, rent, insurance. 'Monthly equivalent' converts yearly bills to a per-month cost so you can compare them. What to watch: subscriptions you forgot you had, or ones whose amount is creeping up.">i</span></h2>
+  <div class="panel" id="recurring-panel"></div>
+
+  <!-- Anomalies -->
+  <h2 class="sec-h">Unusual activity <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Single transactions that are far larger than your usual spend in the same subcategory (a robust outlier test that isn't thrown off by the outlier itself). Recurring bills are excluded so a steady payment isn't flagged. Use it to catch mistakes, fraud or one-off splurges — a flag isn't always a problem, just worth a look.">i</span></h2>
+  <div class="panel" id="anomalies-panel"></div>
+
+  <!-- Trends -->
+  <h2 class="sec-h">Trends <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Whether each category is rising or falling over time — month-over-month and year-over-year change, plus the overall direction of the line. What to watch: categories trending up that you'd rather keep flat.">i</span></h2>
+  <div class="panel" id="trends-panel"></div>
+
+  <!-- By person / account -->
+  <div class="grid2">
+    <div>
+      <h2 class="sec-h">By person <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Spending, income and net for each person in the household. Net = income − spending. Transfers between you don't count here, so this reflects real money each person brought in and spent.">i</span></h2>
+      <div class="panel" id="by-person-panel"></div>
+    </div>
+    <div>
+      <h2 class="sec-h">By account <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="The same money in / out / net breakdown per card or account. Useful to see which card carries most of the spending, or which account most income lands in.">i</span></h2>
+      <div class="panel" id="by-account-panel"></div>
+    </div>
+  </div>
+
+  <!-- Recommendations (narrative; not filtered) -->
+  <h2>Recommendations</h2>
+  <div class="panel">
+    {% if has_insights && !insights.recommendations.is_empty() %}
+      {% for r in insights.recommendations %}
+      <div class="rec">
+        <div class="t">{% if let Some(t) = r.title %}{{ t }}{% endif %}
+          {% if let Some(s) = r.est_monthly_savings %}<span class="save">· save ~{{ s }}/mo</span>{% endif %}</div>
+        {% if let Some(d) = r.detail %}<div>{{ d }}</div>{% endif %}
+      </div>
+      {% endfor %}
+      {% if !insights.trend_notes.is_empty() %}
+        <h3 style="font-size:14px;margin:14px 0 6px;" class="muted">Notes</h3>
+        <ul>{% for n in insights.trend_notes %}<li>{{ n }}</li>{% endfor %}</ul>
+      {% endif %}
+    {% else %}
+      <div class="empty">No insights yet. Run the skill's insight step (it reads analysis.json and writes insights.json) to populate recommendations.</div>
+    {% endif %}
+  </div>
+
+  <!-- Top merchants -->
+  <h2 class="sec-h">Top merchants <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="The merchants you spent the most at, by total. Count and average ticket help you tell a few big purchases apart from many small ones at the same place.">i</span></h2>
+  <div class="panel" id="merchants-panel"></div>
+
+  <!-- All filtered transactions -->
+  <h2 class="sec-h">All transactions (filtered) <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Every transaction matching the current filter, newest first (capped for performance on large sets). Combine the filter bar with the merchant regex and amount min/max search above to drill into exactly what you want.">i</span></h2>
+  <div class="panel" id="all-txns-panel"></div>
+
+  <div class="footer">
+    Deduplication: kept {{ analysis.dedup_report.kept }}, removed {{ analysis.dedup_report.removed }} duplicate row(s) across overlapping files.
+    {% if !analysis.dedup_report.overlaps.is_empty() %}
+      Overlaps:
+      {% for o in analysis.dedup_report.overlaps %}{{ o.file_a }} ∩ {{ o.file_b }} ({{ o.count }}){% if !loop.last %}; {% endif %}{% endfor %}
+    {% endif %}
+    <br>Generated by where-did-money-go · all figures computed deterministically by the Rust engine; filtered views are recomputed in your browser from the same exact, per-transaction amounts. Opens fully offline.
+  </div>
+
+</div>
+
+<script id="wdmg-data" type="application/json">{{ data_json|safe }}</script>
+<script>{{ uplot_js|safe }}</script>
+<script>
+(function(){
+  "use strict";
+  var DATA = {};
+  try { DATA = JSON.parse(document.getElementById("wdmg-data").textContent || "{}"); }
+  catch(e){ console.error("wdmg: bad data island", e); }
+  var A = DATA.analysis || {};
+  var TX = Array.isArray(A.transactions) ? A.transactions : [];
+  var RECON = A.transfers || {matched_pairs:[],external:[],unresolved:[],graph:{nodes:[],edges:[]}};
+  var CURRENCY = A.currency || "";
+
+  // ---------- helpers ----------
+  function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+    return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"})[c]; }); }
+  // Exact parse of a (<=2dp) decimal string to integer cents. Currency is 2dp,
+  // so summing in cents reproduces the Rust Decimal totals exactly.
+  function toCents(s){
+    s = String(s == null ? "0" : s).trim();
+    var neg = false;
+    if(s.charAt(0) === "-"){ neg = true; s = s.slice(1); }
+    else if(s.charAt(0) === "+"){ s = s.slice(1); }
+    var parts = s.split("."), intp = parts[0] || "0", frac = parts[1] || "";
+    var cents;
+    if(frac.length <= 2){
+      frac = (frac + "00").slice(0,2);
+      cents = (parseInt(intp,10)||0) * 100 + (parseInt(frac,10)||0);
+    } else {
+      cents = (parseInt(intp,10)||0) * 100 + Math.round(parseFloat("0." + frac) * 100);
+    }
+    return neg ? -cents : cents;
+  }
+  function fmtMoney(cents){
+    var neg = cents < 0; var v = Math.abs(Math.round(cents));
+    var d = Math.floor(v / 100), c = v % 100;
+    return (neg ? "-" : "") + d.toLocaleString("en-CA") + "." + (c < 10 ? "0" : "") + c;
+  }
+  function dateMs(iso){
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ""); if(!m) return null;
+    return Date.UTC(+m[1], (+m[2]) - 1, +m[3]);
+  }
+  function monthTs(p){
+    var m = /^(\d{4})-(\d{2})/.exec(p || ""); if(!m) return null;
+    return Date.UTC(+m[1], (+m[2]) - 1, 1) / 1000;
+  }
+  function uniqSorted(arr){
+    var seen = {}, out = [];
+    arr.forEach(function(v){ if(v != null && !seen[v]){ seen[v] = 1; out.push(v); } });
+    out.sort(); return out;
+  }
+  // numeric stats (floats; used only for thresholds/labels, mirroring the Rust
+  // f64 ratios — money itself is always summed in exact cents above)
+  function median(xs){ if(!xs.length) return null; var v = xs.slice().sort(function(a,b){return a-b;});
+    var n = v.length; return n % 2 ? v[(n-1)/2] : (v[n/2-1] + v[n/2]) / 2; }
+  function quantile(xs, q){ if(!xs.length) return null; var v = xs.slice().sort(function(a,b){return a-b;});
+    var n = v.length; if(n === 1) return v[0];
+    var h = (n-1) * q, lo = Math.floor(h), frac = h - lo, hi = Math.min(lo+1, n-1);
+    return v[lo] + (v[hi] - v[lo]) * frac; }
+  function mean(xs){ if(!xs.length) return null; var s = 0; xs.forEach(function(x){s+=x;}); return s/xs.length; }
+
+  // ---------- facets ----------
+  var FACETS = {
+    persons:       uniqSorted(TX.map(function(t){return t.person;})),
+    accounts:      uniqSorted(TX.map(function(t){return t.account;})),
+    categories:    uniqSorted(TX.map(function(t){return t.category;})),
+    subcategories: uniqSorted(TX.map(function(t){return t.subcategory;})),
+    kinds:         uniqSorted(TX.map(function(t){return t.kind;}))
+  };
+  var MONTHS = uniqSorted(TX.map(function(t){return t.month;}));
+  // account -> representative person (for filtering the transfers panel by person)
+  var ACCT_PERSON = {};
+  TX.forEach(function(t){ if(t.account && !ACCT_PERSON[t.account]) ACCT_PERSON[t.account] = t.person; });
+
+  var FACET_DEFS = [
+    {key:"persons",       label:"Person"},
+    {key:"accounts",      label:"Account"},
+    {key:"categories",    label:"Category"},
+    {key:"subcategories", label:"Subcategory"},
+    {key:"kinds",         label:"Kind"}
+  ];
+
+  var state = {
+    persons:new Set(), accounts:new Set(), categories:new Set(), subcategories:new Set(),
+    kinds:new Set(), monthFrom:null, monthTo:null, search:"", amtMin:null, amtMax:null
+  };
+  // Merchant search is a regex (case-insensitive). Compiled once per rerender;
+  // null when empty or invalid (then we fall back to a literal substring match).
+  var SEARCH_RE = null, SEARCH_BAD = false;
+  function compileSearch(){
+    SEARCH_RE = null; SEARCH_BAD = false;
+    if(!state.search) return;
+    try { SEARCH_RE = new RegExp(state.search, "i"); }
+    catch(e){ SEARCH_BAD = true; }
+  }
+
+  function passes(t){
+    if(state.persons.size       && !state.persons.has(t.person))           return false;
+    if(state.accounts.size      && !state.accounts.has(t.account))         return false;
+    if(state.categories.size    && !state.categories.has(t.category))      return false;
+    if(state.subcategories.size && !state.subcategories.has(t.subcategory))return false;
+    if(state.kinds.size         && !state.kinds.has(t.kind))               return false;
+    if(state.monthFrom && t.month < state.monthFrom)                       return false;
+    if(state.monthTo   && t.month > state.monthTo)                         return false;
+    if(state.amtMin != null || state.amtMax != null){
+      var mag = Math.abs(toCents(t.amount));
+      if(state.amtMin != null && mag < state.amtMin) return false;
+      if(state.amtMax != null && mag > state.amtMax) return false;
+    }
+    if(state.search){
+      if(SEARCH_RE){ if(!SEARCH_RE.test(t.merchant)) return false; }
+      else if(t.merchant.toUpperCase().indexOf(state.search.toUpperCase()) === -1) return false;
+    }
+    return true;
+  }
+  function anyFilterActive(){
+    return state.persons.size || state.accounts.size || state.categories.size ||
+      state.subcategories.size || state.kinds.size || state.monthFrom || state.monthTo ||
+      state.search || state.amtMin != null || state.amtMax != null;
+  }
+
+  // ---------- aggregation (mirrors wdmg/src/analytics) ----------
+  function spendMag(t){ return t.kind === "spend" ? Math.abs(toCents(t.amount)) : 0; }
+  function incomeAmt(t){ return t.kind === "income" ? toCents(t.amount) : 0; }
+  function isFlow(t){ return t.kind === "spend" || t.kind === "income"; }
+
+  // A transaction's (inflow, outflow) contribution in cents. Spend → outflow,
+  // income → inflow (matching the Rust engine, so transfers are excluded from the
+  // headline flows by default). Transfers/unknowns are attributed BY SIGN so that
+  // a transfer-only selection still shows real movement instead of zeros.
+  function flowParts(t){
+    if(t.kind === "income") return [toCents(t.amount), 0];
+    if(t.kind === "spend")  return [0, Math.abs(toCents(t.amount))];
+    var c = toCents(t.amount); return c >= 0 ? [c, 0] : [0, -c];
+  }
+
+  function computeFlows(rows){
+    // If the selection has any spend/income, those are the meaningful flows and
+    // transfers stay netted out (matches the Rust totals). If it has ONLY
+    // transfers/unknowns (e.g. you filtered to category = Transfers), fall back to
+    // showing the transfer movement so the cards/chart aren't empty.
+    var hasFlow = rows.some(isFlow);
+    var mode = hasFlow ? "flow" : "transfer";
+    function inc(t){ return hasFlow ? isFlow(t) : (t.kind === "transfer" || t.kind === "unknown"); }
+
+    var inflow = 0, outflow = 0, count = 0, buckets = {};
+    rows.forEach(function(t){
+      if(!inc(t)) return;
+      var p = flowParts(t);
+      inflow += p[0]; outflow += p[1]; count += 1;
+      var b = buckets[t.month] || (buckets[t.month] = {inflow:0, outflow:0});
+      b.inflow += p[0]; b.outflow += p[1];
+    });
+    var keys = Object.keys(buckets).sort();
+    var nets = keys.map(function(k){ return buckets[k].inflow - buckets[k].outflow; });
+    var monthly = keys.map(function(k, i){
+      var b = buckets[k], net = b.inflow - b.outflow, base = null;
+      if(i > 0){ var lo = Math.max(0, i - 3); base = mean(nets.slice(lo, i)); }
+      return {period:k, inflow:b.inflow, outflow:b.outflow, net:net, baseline:base};
+    });
+    var savings = mode === "flow" && inflow > 0 ? (inflow - outflow) / inflow : null;
+    return {inflow:inflow, outflow:outflow, net:inflow-outflow, savings:savings,
+      monthly:monthly, mode:mode, count:count};
+  }
+
+  function byCategory(rows, kind, sideTotal){
+    var g = {};
+    rows.forEach(function(t){
+      if(t.kind !== kind) return;
+      var mag = kind === "spend" ? Math.abs(toCents(t.amount)) : toCents(t.amount);
+      var key = t.category + " " + t.subcategory;
+      var e = g[key] || (g[key] = {category:t.category, subcategory:t.subcategory, total:0, count:0});
+      e.total += mag; e.count += 1;
+    });
+    var rowsOut = Object.keys(g).map(function(k){
+      var e = g[k];
+      e.pct = sideTotal > 0 ? (e.total / sideTotal * 100) : 0;
+      return e;
+    });
+    rowsOut.sort(function(a,b){ return b.total - a.total ||
+      (a.category < b.category ? -1 : a.category > b.category ? 1 :
+       a.subcategory < b.subcategory ? -1 : a.subcategory > b.subcategory ? 1 : 0); });
+    return rowsOut;
+  }
+
+  function topMerchants(rows, n){
+    var g = {};
+    rows.forEach(function(t){
+      if(t.kind !== "spend") return;
+      var e = g[t.merchant] || (g[t.merchant] = {merchant:t.merchant, total:0, count:0});
+      e.total += Math.abs(toCents(t.amount)); e.count += 1;
+    });
+    var out = Object.keys(g).map(function(k){ var e = g[k]; e.avg = e.count ? e.total/e.count : 0; return e; });
+    out.sort(function(a,b){ return b.total - a.total || (a.merchant < b.merchant ? -1 : a.merchant > b.merchant ? 1 : 0); });
+    return out.slice(0, n);
+  }
+
+  function byEntity(rows, field){
+    var g = {};
+    rows.forEach(function(t){
+      if(!isFlow(t)) return;
+      var id = t[field] || "unassigned";
+      var e = g[id] || (g[id] = {id:id, spend:0, income:0});
+      e.spend += spendMag(t); e.income += incomeAmt(t);
+    });
+    var out = Object.keys(g).sort().map(function(k){ var e = g[k]; e.net = e.income - e.spend; return e; });
+    return out;
+  }
+
+  var CADENCES = [["weekly",7,2],["biweekly",14,3],["monthly",30,4],["yearly",365,21]];
+  function detectRecurring(rows){
+    var g = {};
+    rows.forEach(function(t){
+      if(t.kind !== "spend") return;
+      (g[t.merchant] || (g[t.merchant] = [])).push([dateMs(t.date), Math.abs(toCents(t.amount))]);
+    });
+    var out = [];
+    Object.keys(g).forEach(function(merchant){
+      var occ = g[merchant].filter(function(o){ return o[0] != null; });
+      if(occ.length < 3) return;
+      occ.sort(function(a,b){ return a[0] - b[0]; });
+      var intervals = [];
+      for(var i = 1; i < occ.length; i++) intervals.push(Math.round((occ[i][0] - occ[i-1][0]) / 86400000));
+      var medInt = median(intervals); if(medInt == null) return;
+      var medDays = Math.round(medInt);
+      var cad = null;
+      for(var c = 0; c < CADENCES.length; c++){ if(Math.abs(medDays - CADENCES[c][1]) <= CADENCES[c][2]){ cad = CADENCES[c]; break; } }
+      if(!cad) return;
+      var amounts = occ.map(function(o){ return o[1]; });
+      var m = mean(amounts); if(m === 0) return;
+      var varc = mean(amounts.map(function(x){ return (x-m)*(x-m); }));
+      var cov = Math.sqrt(varc) / Math.abs(m);
+      if(cov >= 0.15) return;
+      var typical = median(amounts);
+      var monthlyEq = medDays > 0 ? typical * 30 / medDays : typical;
+      var last = occ[occ.length-1][0];
+      var next = last != null ? new Date(last + medDays*86400000).toISOString().slice(0,10) : null;
+      out.push({merchant:merchant, cadence:cad[0], interval_days:medDays, typical:typical,
+        occurrences:occ.length, monthly_equivalent:monthlyEq, predicted_next:next});
+    });
+    out.sort(function(a,b){ return b.monthly_equivalent - a.monthly_equivalent ||
+      (a.merchant < b.merchant ? -1 : a.merchant > b.merchant ? 1 : 0); });
+    return out;
+  }
+
+  function detectAnomalies(rows){
+    var out = [];
+    // Stable recurring/subscription charges are not anomalies — exclude their
+    // merchants from the single-transaction pass (mirrors the Rust detector).
+    var recurringMerchants = {};
+    detectRecurring(rows).forEach(function(r){ recurringMerchants[r.merchant] = 1; });
+    // (a) per-SUBCATEGORY single-transaction MAD z-score — like-for-like spend, so a
+    // pricey-but-normal subcategory isn't flagged against a cheaper one in the same category.
+    var bySub = {};
+    rows.forEach(function(t){ if(t.kind !== "spend") return;
+      if(recurringMerchants[t.merchant]) return;
+      var key = t.subcategory || "Uncategorized";
+      (bySub[key] || (bySub[key] = [])).push([Math.abs(toCents(t.amount)), t.date, t.merchant]); });
+    Object.keys(bySub).forEach(function(sub){
+      var arr = bySub[sub]; if(arr.length < 4) return;
+      var mags = arr.map(function(r){ return r[0]; });
+      var med = median(mags);
+      var devs = mags.map(function(x){ return Math.abs(x - med); });
+      var madVal = median(devs);
+      var denom = 1.4826 * madVal; if(denom === 0) return;
+      arr.forEach(function(r){
+        var z = Math.abs(r[0] - med) / denom;
+        if(z > 3.5) out.push({method:"mad_zscore", category:sub, period_or_date:r[1],
+          amount:r[0], baseline:med, severity:z.toFixed(2), merchant:r[2]});
+      });
+    });
+    // (b) per-category monthly IQR fence
+    var catMonth = {};
+    rows.forEach(function(t){ if(t.kind !== "spend") return;
+      var cm = catMonth[t.category] || (catMonth[t.category] = {});
+      cm[t.month] = (cm[t.month] || 0) + Math.abs(toCents(t.amount)); });
+    Object.keys(catMonth).forEach(function(cat){
+      var months = catMonth[cat], keys = Object.keys(months);
+      if(keys.length < 4) return;
+      var totals = keys.map(function(k){ return months[k]; });
+      var q1 = quantile(totals, 0.25), q3 = quantile(totals, 0.75);
+      var fence = q3 + 1.5 * (q3 - q1); if(fence === 0) return;
+      keys.sort().forEach(function(mo){
+        if(months[mo] > fence) out.push({method:"monthly_iqr", category:cat, period_or_date:mo,
+          amount:months[mo], baseline:fence, severity:(months[mo]/fence).toFixed(2), merchant:null});
+      });
+    });
+    out.sort(function(a,b){
+      return (a.method < b.method ? -1 : a.method > b.method ? 1 :
+        a.category < b.category ? -1 : a.category > b.category ? 1 :
+        a.period_or_date < b.period_or_date ? -1 : a.period_or_date > b.period_or_date ? 1 :
+        b.amount - a.amount); });
+    return out;
+  }
+
+  function lsSlope(ys){
+    var n = ys.length; if(n < 2) return null;
+    var sx=0, sy=0, sxx=0, sxy=0;
+    for(var i=0;i<n;i++){ sx+=i; sy+=ys[i]; sxx+=i*i; sxy+=i*ys[i]; }
+    var denom = n*sxx - sx*sx; if(denom === 0) return null;
+    return (n*sxy - sx*sy) / denom;
+  }
+  function detectTrends(rows){
+    var byCat = {};
+    rows.forEach(function(t){ if(t.kind !== "spend") return;
+      var cm = byCat[t.category] || (byCat[t.category] = {});
+      cm[t.month] = (cm[t.month] || 0) + Math.abs(toCents(t.amount)); });
+    var out = [];
+    Object.keys(byCat).forEach(function(cat){
+      var months = byCat[cat], keys = Object.keys(months).sort();
+      if(!keys.length) return;
+      var lastKey = keys[keys.length-1], lastTot = months[lastKey];
+      var momAbs=null, momPct=null;
+      if(keys.length >= 2){ var prev = months[keys[keys.length-2]];
+        momAbs = lastTot - prev; momPct = prev === 0 ? null : (momAbs/prev*100).toFixed(2); }
+      var yoyAbs=null, yoyPct=null;
+      var ym = /^(\d{4})-(\d{2})/.exec(lastKey);
+      if(ym){ var pk = (+ym[1]-1) + "-" + ym[2];
+        if(months[pk] != null){ yoyAbs = lastTot - months[pk]; yoyPct = months[pk]===0?null:(yoyAbs/months[pk]*100).toFixed(2); } }
+      var slope = lsSlope(keys.map(function(k){ return months[k]/100; })); // dollars, eps=1.0
+      var dir = slope == null ? "flat" : slope > 1 ? "rising" : slope < -1 ? "falling" : "flat";
+      out.push({category:cat, mom_abs:momAbs, mom_pct:momPct, yoy_abs:yoyAbs, yoy_pct:yoyPct, direction:dir});
+    });
+    out.sort(function(a,b){ return a.category < b.category ? -1 : a.category > b.category ? 1 : 0; });
+    return out;
+  }
+
+  // ---------- renderers ----------
+  function renderCards(f){
+    var netCls = f.net >= 0 ? "pos" : "neg";
+    var html;
+    if(f.mode === "transfer"){
+      html = card("Transfers in", fmtMoney(f.inflow), "pos") +
+        card("Transfers out", fmtMoney(f.outflow), "neg") +
+        card("Net moved", fmtMoney(f.net), netCls) +
+        card("# transfers", String(f.count), "");
+    } else {
+      var sr = f.savings == null ? "—" : (f.savings * 100).toFixed(1) + "%";
+      var srStyle = f.savings == null ? "" : "color:" + savingsColor(f.savings) + ";";
+      var srTip = "Share of money-in you kept (didn't spend): (in − out) ÷ in. " +
+        "Coloured green at ~30%+, yellow around 15%, red near 0% or negative.";
+      html = card("Money in", fmtMoney(f.inflow), "pos") +
+        card("Money out", fmtMoney(f.outflow), "neg") +
+        card("Net", fmtMoney(f.net), netCls) +
+        card("Savings rate", sr, "", srStyle, srTip);
+    }
+    document.getElementById("cards").innerHTML = html;
+    function card(k,v,cls,style,tip){ return '<div class="card"'+(tip?' title="'+esc(tip)+'"':'')+
+      '><div class="k">'+esc(k)+'</div><div class="v '+cls+'"'+(style?' style="'+style+'"':'')+
+      '>'+esc(v)+'</div></div>'; }
+  }
+  // Green (high savings) → yellow → red (none/negative). HSL hue 0..120.
+  function savingsColor(rate){
+    var t = Math.max(0, Math.min(1, rate / 0.30)); // 30%+ savings = full green
+    return "hsl(" + Math.round(t * 120) + ",75%,42%)";
+  }
+
+  // Distinguishable segment colours (work on light & dark); cycled per subcategory.
+  var PALETTE = ["#3b6ea5","#5b9bd5","#26a69a","#7e57c2","#ef6c00","#c2384b",
+    "#8d6e63","#66bb6a","#ab47bc","#ffa726","#42a5f5","#789262","#ec407a","#26c6da"];
+
+  // Hierarchical category → subcategory view. Each category is a header with a
+  // stacked bar segmented by subcategory (segment width = share of the side
+  // total), and an indented, collapsible breakdown of its subcategories (each
+  // bar = share of that category). Colours map segment ↔ subrow.
+  function renderHier(el, flat, sideTotal, emptyMsg, amtCls){
+    if(!flat.length){ el.innerHTML = '<div class="empty">'+esc(emptyMsg)+'</div>'; return; }
+    var cats = {};
+    flat.forEach(function(r){
+      var c = cats[r.category] || (cats[r.category] = {category:r.category, total:0, count:0, subs:[]});
+      c.total += r.total; c.count += r.count;
+      c.subs.push({subcategory:r.subcategory, total:r.total, count:r.count});
+    });
+    var list = Object.keys(cats).map(function(k){ return cats[k]; });
+    list.sort(function(a,b){ return b.total - a.total || (a.category < b.category ? -1 : 1); });
+    el.innerHTML = list.map(function(c){
+      c.subs.sort(function(a,b){ return b.total - a.total; });
+      var catPct = sideTotal > 0 ? c.total / sideTotal * 100 : 0;
+      var segs = c.subs.map(function(s,i){
+        var wOverall = sideTotal > 0 ? s.total / sideTotal * 100 : 0;
+        var pctCat = c.total > 0 ? s.total / c.total * 100 : 0;
+        return '<div class="seg" style="width:'+wOverall.toFixed(3)+'%;background:'+PALETTE[i % PALETTE.length]+'" '+
+          'title="'+esc(s.subcategory)+': '+fmtMoney(s.total)+' ('+pctCat.toFixed(1)+'% of '+esc(c.category)+')"></div>';
+      }).join("");
+      var subrows = c.subs.map(function(s,i){
+        var pctCat = c.total > 0 ? s.total / c.total * 100 : 0;
+        return '<div class="barrow sub"><div class="lbl">↳ '+esc(s.subcategory)+
+          ' <span class="muted">· '+s.count+'</span></div>'+
+          '<div class="bartrack"><div class="barfill" style="width:'+pctCat.toFixed(2)+'%;background:'+PALETTE[i % PALETTE.length]+'"></div></div>'+
+          '<div class="amt"><span class="'+amtCls+'">'+fmtMoney(s.total)+'</span> <span class="muted">('+pctCat.toFixed(1)+'%)</span></div></div>';
+      }).join("");
+      var subLabel = c.subs.length + ' sub' + (c.subs.length === 1 ? '' : 's');
+      return '<div class="catgroup"><div class="cathead barrow">'+
+        '<div class="lbl"><span class="caret">▾</span> '+esc(c.category)+' <span class="muted">· '+subLabel+'</span></div>'+
+        '<div class="bartrack stacked">'+segs+'</div>'+
+        '<div class="amt"><span class="'+amtCls+'">'+fmtMoney(c.total)+'</span> <span class="muted">('+catPct.toFixed(1)+'%)</span></div></div>'+
+        '<div class="subrows">'+subrows+'</div></div>';
+    }).join("");
+    el.querySelectorAll(".cathead").forEach(function(h){
+      h.addEventListener("click", function(){ h.parentNode.classList.toggle("collapsed"); });
+    });
+  }
+
+  function renderSpend(f, rows){
+    renderHier(document.getElementById("spend-bars"), byCategory(rows, "spend", f.outflow),
+      f.outflow, "No categorized spending in the current selection.", "neg");
+  }
+
+  function renderIncome(f, rows){
+    renderHier(document.getElementById("income-panel"), byCategory(rows, "income", f.inflow),
+      f.inflow, "No categorized income in the current selection.", "pos");
+  }
+
+  function renderByEntity(panelId, field, label, rows){
+    var el = document.getElementById(panelId);
+    var ents = byEntity(rows, field);
+    if(!ents.length){ el.innerHTML = '<div class="empty">No '+esc(label.toLowerCase())+' attribution.</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>'+esc(label)+'</th><th class="num">Spend</th><th class="num">Income</th><th class="num">Net</th></tr></thead><tbody>'+
+      ents.map(function(e){ return '<tr><td>'+esc(e.id)+'</td><td class="num neg">'+fmtMoney(e.spend)+
+        '</td><td class="num pos">'+fmtMoney(e.income)+'</td><td class="num">'+fmtMoney(e.net)+'</td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
+
+  function renderMerchants(rows){
+    var el = document.getElementById("merchants-panel");
+    var m = topMerchants(rows, 20);
+    if(!m.length){ el.innerHTML = '<div class="empty">No merchant spend in the current selection.</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Merchant</th><th class="num">Total</th><th class="num">Count</th><th class="num">Avg</th></tr></thead><tbody>'+
+      m.map(function(x){ return '<tr><td>'+esc(x.merchant)+'</td><td class="num">'+fmtMoney(x.total)+
+        '</td><td class="num">'+x.count+'</td><td class="num muted">'+fmtMoney(x.avg)+'</td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
+
+  // Every transaction matching the current filter, newest first. Capped to keep
+  // the DOM responsive on huge selections (a note shows when truncated).
+  var ALL_TXN_CAP = 2000;
+  function renderAllTxns(rows){
+    var el = document.getElementById("all-txns-panel");
+    if(!rows.length){ el.innerHTML = '<div class="empty">No transactions in the current selection.</div>'; return; }
+    var sorted = rows.slice().sort(function(a,b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+    var shown = sorted.slice(0, ALL_TXN_CAP);
+    var note = sorted.length > ALL_TXN_CAP
+      ? '<div class="scope-note">Showing newest '+ALL_TXN_CAP+' of '+sorted.length+' matching transactions — narrow the filter to see the rest.</div>'
+      : '<div class="scope-note">'+sorted.length+' transaction'+(sorted.length===1?'':'s')+'.</div>';
+    el.innerHTML = note +
+      '<table><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th>Kind</th><th>Person</th><th>Account</th><th class="num">Amount</th></tr></thead><tbody>'+
+      shown.map(function(t){
+        var c = toCents(t.amount); var cls = c < 0 ? "neg" : "pos";
+        return '<tr><td class="muted">'+esc(t.date)+'</td><td>'+esc(t.merchant)+
+          '</td><td>'+esc(t.category)+' <span class="muted">/ '+esc(t.subcategory)+'</span></td>'+
+          '<td><span class="tag">'+esc(t.kind)+'</span></td><td>'+esc(t.person)+'</td><td>'+esc(t.account)+
+          '</td><td class="num '+cls+'">'+fmtMoney(c)+'</td></tr>';
+      }).join("")+
+      '</tbody></table>';
+  }
+
+  function renderRecurring(rows){
+    var el = document.getElementById("recurring-panel");
+    var r = detectRecurring(rows);
+    if(!r.length){ el.innerHTML = '<div class="empty">No recurring charges in the current selection.</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Merchant</th><th>Cadence</th><th class="num">Typical</th><th class="num">Monthly equiv.</th><th class="num">Seen</th><th>Next</th></tr></thead><tbody>'+
+      r.map(function(x){ return '<tr><td>'+esc(x.merchant)+'</td><td><span class="tag">'+esc(x.cadence)+
+        '</span></td><td class="num">'+fmtMoney(x.typical)+'</td><td class="num">'+fmtMoney(x.monthly_equivalent)+
+        '</td><td class="num">'+x.occurrences+'</td><td class="muted">'+(x.predicted_next?esc(x.predicted_next):"—")+'</td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
+
+  function renderAnomalies(rows){
+    var el = document.getElementById("anomalies-panel");
+    var a = detectAnomalies(rows);
+    if(!a.length){ el.innerHTML = '<div class="empty">Nothing unusual in the current selection.</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>When/where</th><th>Category</th><th class="num">Amount</th><th class="num">Baseline</th><th>Severity</th><th>Method</th></tr></thead><tbody>'+
+      a.map(function(x){ var sevNum = parseFloat(x.severity);
+        var sev = sevNum >= 5 ? "sev-high" : sevNum >= 2 ? "sev-medium" : "sev-low";
+        return '<tr><td>'+esc(x.period_or_date)+(x.merchant?' · <span class="muted">'+esc(x.merchant)+'</span>':"")+
+        '</td><td>'+esc(x.category)+'</td><td class="num">'+fmtMoney(x.amount)+'</td><td class="num muted">'+fmtMoney(x.baseline)+
+        '</td><td class="'+sev+'">'+esc(x.severity)+'</td><td><span class="tag">'+esc(x.method)+'</span></td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
+
+  function renderTrends(rows){
+    var el = document.getElementById("trends-panel");
+    var t = detectTrends(rows);
+    if(!t.length){ el.innerHTML = '<div class="empty">Not enough history for trends in the current selection.</div>'; return; }
+    function cell(v){ return v == null ? "—" : fmtMoney(v); }
+    function pct(v){ return v == null ? "—" : v + "%"; }
+    el.innerHTML = '<table><thead><tr><th>Category</th><th>Direction</th><th class="num">MoM Δ</th><th class="num">MoM %</th><th class="num">YoY Δ</th><th class="num">YoY %</th></tr></thead><tbody>'+
+      t.map(function(x){ return '<tr><td>'+esc(x.category)+'</td><td>'+esc(x.direction)+
+        '</td><td class="num">'+cell(x.mom_abs)+'</td><td class="num">'+pct(x.mom_pct)+
+        '</td><td class="num">'+cell(x.yoy_abs)+'</td><td class="num">'+pct(x.yoy_pct)+'</td></tr>'; }).join("")+
+      '</tbody></table>';
+  }
+
+  function renderTransfers(rows){
+    var el = document.getElementById("transfers-panel");
+    // Scope the precomputed reconciliation to the CURRENT filter by keeping only
+    // the legs whose underlying transaction survived every active filter. Each
+    // transfer leg is keyed by account|date|abs-cents — and the filtered `rows`
+    // already passed person/account/month AND category/subcategory/kind/merchant-
+    // regex/amount, so this makes the whole section honour all of them.
+    var legKeys = {};
+    rows.forEach(function(t){
+      if(t.kind !== "transfer") return;
+      legKeys[t.account + "|" + t.date + "|" + Math.abs(toCents(t.amount))] = 1;
+    });
+    function hasLeg(acct, date, amtStr){
+      return !!legKeys[acct + "|" + date + "|" + Math.abs(toCents(amtStr))];
+    }
+    var pairs = (RECON.matched_pairs || []).filter(function(p){
+      return hasLeg(p.from_account, p.out_date, p.amount) || hasLeg(p.to_account, p.in_date, p.amount); });
+    var ext = (RECON.external || []).filter(function(e){
+      return hasLeg(e.from_account, e.date, e.amount); });
+
+    var html = "";
+    if(anyFilterActive()) html += '<div class="scope-note">Reflects the current filter.</div>';
+    // Rebuild a simple flow graph from the filtered rows.
+    var edgeMap = {}, nodeSet = {};
+    var externalIds = {}; (RECON.graph && RECON.graph.nodes || []).forEach(function(n){ if(n.external) externalIds[n.id] = 1; });
+    (RECON.external || []).forEach(function(e){ externalIds[e.to] = 1; });
+    function addEdge(from, to, cents){
+      nodeSet[from] = 1; nodeSet[to] = 1;
+      var k = from + " " + to, e = edgeMap[k] || (edgeMap[k] = {from:from, to:to, net:0, count:0});
+      e.net += cents; e.count += 1;
+    }
+    pairs.forEach(function(p){ addEdge(p.from_account, p.to_account, Math.abs(toCents(p.amount))); });
+    ext.forEach(function(e){ addEdge(e.from_account, e.to, Math.abs(toCents(e.amount))); });
+    var nodes = Object.keys(nodeSet).sort();
+    var edges = Object.keys(edgeMap).map(function(k){ return edgeMap[k]; });
+
+    if(!nodes.length){
+      el.innerHTML = html + '<div class="empty">No transfers in the current selection.</div>'; return; }
+
+    html += '<div class="flow" id="flow-graph"></div>'+
+      '<div class="flow-legend">○ external account · amounts sit on the right by destination · click a line to highlight it</div>';
+    if(pairs.length){
+      var pairsTot = pairs.reduce(function(a,p){ return a + Math.abs(toCents(p.amount)); }, 0);
+      var pairsBody = '<table><thead><tr><th>From</th><th>To</th><th class="num">Amount</th><th>Out</th><th>In</th><th>Confidence</th></tr></thead><tbody>'+
+        pairs.map(function(p){ return '<tr><td>'+esc(p.from_account)+'</td><td>'+esc(p.to_account)+
+          '</td><td class="num">'+fmtMoney(toCents(p.amount))+'</td><td class="muted">'+esc(p.out_date)+
+          '</td><td class="muted">'+esc(p.in_date)+'</td><td><span class="tag">'+esc(p.confidence)+'</span></td></tr>'; }).join("")+
+        '</tbody></table>';
+      html += collapsible("Matched transfers", pairs.length + " pairs · " + fmtMoney(pairsTot), pairsBody);
+    }
+    if(ext.length){
+      var extTot = ext.reduce(function(a,e){ return a + Math.abs(toCents(e.amount)); }, 0);
+      var extBody = '<table><thead><tr><th>From</th><th>To</th><th class="num">Amount</th><th>Date</th></tr></thead><tbody>'+
+        ext.map(function(e){ return '<tr><td>'+esc(e.from_account)+'</td><td>→ '+esc(e.to)+
+          '</td><td class="num">'+fmtMoney(toCents(e.amount))+'</td><td class="muted">'+esc(e.date)+'</td></tr>'; }).join("")+
+        '</tbody></table>';
+      html += collapsible("Sent to external accounts", ext.length + " · " + fmtMoney(extTot), extBody);
+    }
+    el.innerHTML = html;
+    wireCollapsibles(el);
+    drawFlowGraph(nodes, edges, externalIds);
+  }
+
+  // A collapsed-by-default section: clickable header (caret + title + summary)
+  // over a hidden body. Re-usable for the transfer tables.
+  function collapsible(title, summary, bodyHtml){
+    return '<div class="collapsible collapsed">'+
+      '<h3 class="collapse-head"><span class="caret">▾</span>'+esc(title)+
+      ' <span class="muted" style="font-weight:400;">· '+esc(summary)+'</span></h3>'+
+      '<div class="collapse-body">'+bodyHtml+'</div></div>';
+  }
+  function wireCollapsibles(root){
+    root.querySelectorAll(".collapse-head").forEach(function(h){
+      h.addEventListener("click", function(){ h.parentNode.classList.toggle("collapsed"); });
+    });
+  }
+
+  function drawFlowGraph(nodes, edges, externalIds){
+    var el = document.getElementById("flow-graph");
+    if(!el || !nodes.length || !edges.length){ if(el) el.innerHTML = ""; return; }
+    var W = el.clientWidth || 900;
+    // Reserve generous side gutters so full account names are never clipped.
+    var gutter = Math.min(210, Math.max(96, Math.round(W * 0.2)));
+    var rowH = 44, topPad = 20;
+    var H = Math.max(140, nodes.length * rowH + 28);
+    var idx = {}; nodes.forEach(function(n,i){ idx[n] = i; });
+    function y(i){ return topPad + i*rowH; }
+    var colL = gutter, colR = W - gutter, mx = (colL + colR) / 2;
+    // Stagger amount labels per destination row so fan-in edges don't overlap.
+    var destSeen = {};
+    var svg = ['<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="'+H+'" font-family="inherit">'];
+    edges.forEach(function(e){
+      var a = idx[e.from], b = idx[e.to]; if(a == null || b == null) return;
+      var y1 = y(a), y2 = y(b);
+      var d = 'M '+colL+' '+y1+' C '+mx+' '+y1+', '+mx+' '+y2+', '+colR+' '+y2;
+      var off = (destSeen[b] = (destSeen[b] || 0) + 1);
+      var ly = y2 - 6 - (off - 1) * 13;        // amounts sit to the RIGHT, near the destination
+      var amt = esc(fmtMoney(e.net)) + ' (' + e.count + ')';
+      svg.push('<g class="edge-g">'+
+        '<path class="edge-hit" d="'+d+'"/>'+
+        '<path class="edge" d="'+d+'"/>'+
+        '<text class="amt" x="'+(colR - 14)+'" y="'+ly+'" text-anchor="end">'+amt+'</text>'+
+        '</g>');
+    });
+    nodes.forEach(function(n,i){
+      var ext = externalIds[n];
+      var circ = ext ? 'fill="var(--panel)" stroke="var(--accent)" stroke-width="2"' : 'fill="var(--accent)"';
+      svg.push('<g>'+
+        '<circle cx="'+colL+'" cy="'+y(i)+'" r="5" '+circ+'/>'+
+        '<text x="'+(colL-12)+'" y="'+(y(i)+4)+'" text-anchor="end" fill="var(--ink)" font-size="12">'+esc(n)+'</text>'+
+        '<circle cx="'+colR+'" cy="'+y(i)+'" r="5" '+circ+'/>'+
+        '<text x="'+(colR+12)+'" y="'+(y(i)+4)+'" text-anchor="start" fill="var(--ink)" font-size="12">'+esc(n)+'</text>'+
+        '</g>');
+    });
+    svg.push('</svg>');
+    el.innerHTML = svg.join("");
+    // Click a line to pin its highlight (colour + bold + thicker); click again to clear.
+    el.querySelectorAll(".edge-g").forEach(function(g){
+      g.addEventListener("click", function(ev){
+        ev.stopPropagation();
+        var was = g.classList.contains("sel");
+        el.querySelectorAll(".edge-g.sel").forEach(function(x){ x.classList.remove("sel"); });
+        if(!was) g.classList.add("sel");
+      });
+    });
+  }
+
+  // ---------- e-transfers by recipient ----------
+  // Parse the counterparty straight out of the description, so e-transfers are
+  // grouped by who you paid / who paid you even when no person rule exists.
+  function etransferInfo(merchant){
+    var u = String(merchant || "").toUpperCase();
+    if(u.indexOf("E-TRANSFER") === -1 && u.indexOf("ETRNSFR") === -1 && u.indexOf("E TRANSFER") === -1) return null;
+    var cancelled = u.indexOf("CANCELLED") !== -1;
+    var m = /(?:E[- ]?TRANSFER|ETRNSFR)\s+(TO|FROM|SENT|RECEIVED|RCVD|RECVD)\b[:\s]*(.*)$/i.exec(merchant);
+    var dir = "sent", who = "";
+    if(m){ var k = m[1].toUpperCase();
+      dir = (k === "FROM" || k === "RECEIVED" || k === "RCVD" || k === "RECVD") ? "received" : "sent";
+      who = (m[2] || "").trim(); }
+    who = who.replace(/[\s:.\-]+$/, "").trim();
+    if(!who) who = "(unspecified)";
+    if(cancelled) who = who + " (cancelled)";
+    return {dir:dir, who:who};
+  }
+  function renderEtransfers(rows){
+    var el = document.getElementById("etransfers-panel");
+    var g = {};
+    rows.forEach(function(t){
+      if(t.kind !== "transfer") return;
+      var info = etransferInfo(t.merchant); if(!info) return;
+      var key = info.dir + "|" + info.who;
+      var e = g[key] || (g[key] = {dir:info.dir, who:info.who, total:0, count:0, first:t.date, last:t.date});
+      e.total += Math.abs(toCents(t.amount)); e.count += 1;
+      if(t.date < e.first) e.first = t.date;
+      if(t.date > e.last)  e.last = t.date;
+    });
+    var all = Object.keys(g).map(function(k){ return g[k]; });
+    if(!all.length){ el.innerHTML = '<div class="empty">No e-transfers in the current selection.</div>'; return; }
+    all.sort(function(a,b){ return b.total - a.total || (a.who < b.who ? -1 : a.who > b.who ? 1 : 0); });
+    function tbl(title, dir, who){
+      var list = all.filter(function(r){ return r.dir === dir; });
+      if(!list.length) return "";
+      var sum = list.reduce(function(a,r){ return a + r.total; }, 0);
+      return '<h3 style="font-size:14px;margin:14px 0 6px;" class="muted">'+esc(title)+' · '+fmtMoney(sum)+
+        ' across '+list.length+' '+(list.length === 1 ? "counterparty" : "counterparties")+'</h3>'+
+        '<table><thead><tr><th>'+esc(who)+'</th><th class="num">Total</th><th class="num">Count</th><th>First</th><th>Last</th></tr></thead><tbody>'+
+        list.map(function(r){ return '<tr><td>'+esc(r.who)+'</td><td class="num">'+fmtMoney(r.total)+
+          '</td><td class="num">'+r.count+'</td><td class="muted">'+esc(r.first)+'</td><td class="muted">'+esc(r.last)+'</td></tr>'; }).join("")+
+        '</tbody></table>';
+    }
+    el.innerHTML = tbl("Sent to", "sent", "Recipient") + tbl("Received from", "received", "Sender");
+  }
+
+  // ---------- cash-flow chart ----------
+  var chartEl = document.getElementById("cashflow-chart");
+  var uplotInst = null;
+  var chartDragging = false; // true once a drag begins inside the chart
+  // The cash-flow chart builds its own series straight from the filtered
+  // transactions at a DYNAMIC granularity, so zooming/filtering to a short window
+  // shows finer detail. Granularity is chosen to keep the series at most 365
+  // points: daily up to ~1 year, then weekly, then monthly for very long spans —
+  // so a short selection shows one point per day, never just a handful.
+  var DAY_MS = 86400000;
+  // The All / 12mo / YTD buttons constrain the chart's date window (not the
+  // global filter), scoped to the currently filtered rows.
+  function rangeFilterRows(rows, mode){
+    if(mode === "all" || !rows.length) return rows;
+    var maxMs = -Infinity;
+    rows.forEach(function(t){ var d = dateMs(t.date); if(d != null && d > maxMs) maxMs = d; });
+    if(maxMs === -Infinity) return rows;
+    var md = new Date(maxMs), cutoff;
+    if(mode === "12") cutoff = Date.UTC(md.getUTCFullYear(), md.getUTCMonth() - 11, 1);
+    else if(mode === "ytd") cutoff = Date.UTC(md.getUTCFullYear(), 0, 1);
+    else return rows;
+    return rows.filter(function(t){ var d = dateMs(t.date); return d != null && d >= cutoff; });
+  }
+  function pickGran(spanDays){
+    if(spanDays <= 366) return "day";
+    if(spanDays <= 366 * 7) return "week";
+    return "month";
+  }
+  // Bucket-start timestamp in SECONDS (uPlot x is seconds; dateMs returns ms).
+  function bucketSec(ms, gran){
+    var d = new Date(ms);
+    if(gran === "month") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+    if(gran === "week"){
+      var mondayMs = ms - ((d.getUTCDay() + 6) % 7) * DAY_MS, w = new Date(mondayMs);
+      return Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()) / 1000;
+    }
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000;
+  }
+  var GRAN_LABEL = { day: "daily", week: "weekly", month: "monthly" };
+  function buildSeries(rows){
+    var hasFlow = rows.some(isFlow);
+    var items = [], minMs = Infinity, maxMs = -Infinity;
+    rows.forEach(function(t){
+      var include = hasFlow ? isFlow(t) : (t.kind === "transfer" || t.kind === "unknown");
+      if(!include) return;
+      var ms = dateMs(t.date); if(ms == null) return;
+      if(ms < minMs) minMs = ms; if(ms > maxMs) maxMs = ms;
+      var p = flowParts(t); items.push([ms, p[0], p[1]]);
+    });
+    if(!items.length) return { xs:[], inflow:[], outflow:[], net:[], base:[], gran:"day" };
+    var gran = pickGran((maxMs - minMs) / DAY_MS + 1);
+    var b = {};
+    items.forEach(function(it){ var k = bucketSec(it[0], gran);
+      var o = b[k] || (b[k] = { i:0, o:0 }); o.i += it[1]; o.o += it[2]; });
+    var keys = Object.keys(b).map(Number).sort(function(a, c){ return a - c; });
+    var nets = keys.map(function(k){ return b[k].i - b[k].o; });
+    var win = gran === "day" ? 30 : gran === "week" ? 4 : 3; // trailing baseline window
+    var xs = [], inflow = [], outflow = [], net = [], base = [];
+    keys.forEach(function(k, i){ var o = b[k], nv = o.i - o.o;
+      xs.push(k); inflow.push(o.i / 100); outflow.push(Math.abs(o.o) / 100); net.push(nv / 100);
+      base.push(i > 0 ? mean(nets.slice(Math.max(0, i - win), i)) / 100 : null); });
+    return { xs:xs, inflow:inflow, outflow:outflow, net:net, base:base, gran:gran };
+  }
+  function activeRange(){
+    var b = document.querySelector("#range-buttons .active");
+    return b ? b.getAttribute("data-range") : "all";
+  }
+  function drawChart(){
+    if(!window.uPlot || !chartEl) return;
+    var s = buildSeries(rangeFilterRows(lastRows, activeRange()));
+    var xs = s.xs, inflow = s.inflow, outflow = s.outflow, net = s.net, base = s.base;
+    var resEl = document.getElementById("cashflow-res");
+    if(resEl) resEl.textContent = xs.length ? (GRAN_LABEL[s.gran] + " · " + xs.length + " pts") : "";
+    if(uplotInst){ uplotInst.destroy(); uplotInst = null; }
+    var empty = document.getElementById("cashflow-empty");
+    if(!xs.length){ if(empty) empty.style.display = "block"; return; }
+    if(empty) empty.style.display = "none";
+    var dark = document.documentElement.getAttribute("data-theme") === "dark";
+    var stroke = dark ? "#9aa3b2" : "#6b7280";
+    uplotInst = new uPlot({
+      width: chartEl.clientWidth || 640, height: 300,
+      legend: { live: true },
+      axes: [ { stroke: stroke }, { stroke: stroke } ],
+      scales: { x: { time: true } },
+      // Drag selects a date range to filter by (instead of zooming the axis):
+      // setScale:false keeps the selection box, and the mouseup hook below turns
+      // it into the From/To month filter so every section follows.
+      cursor: { drag: { x: true, y: false, setScale: false } },
+      // Mark that a drag started in the chart; the release is handled by a
+      // document-level mouseup (below) so it still applies if the pointer left
+      // the chart's bounds before release. (u.over dies with each instance, so
+      // this listener is auto-cleaned on redraw — no leak.)
+      hooks: { ready: [function(u){
+        u.over.addEventListener("mousedown", function(){ chartDragging = true; });
+      }] },
+      series: [ {},
+        { label: "In",  stroke: "#10915a", width: 2 },
+        { label: "Out", stroke: "#c2384b", width: 2 },
+        { label: "Net", stroke: "#3b6ea5", width: 2 },
+        { label: "Baseline", stroke: "#b8862c", width: 1, dash: [6,4] } ]
+    }, [xs, inflow, outflow, net, base], chartEl);
+  }
+  // Map a uPlot x-value (seconds) back to a "YYYY-MM" month key.
+  function tsToMonth(ts){
+    var d = new Date(ts * 1000);
+    return d.getUTCFullYear() + "-" + ("0" + (d.getUTCMonth() + 1)).slice(-2);
+  }
+  // Turn a dragged [minTs,maxTs] selection into the From/To month filter.
+  function applyChartRange(a, b){
+    var minTs = Math.min(a, b), maxTs = Math.max(a, b);
+    // Prefer the actual month buckets whose data point falls inside the drag;
+    // fall back to the calendar month at each edge (clamped to known months).
+    var inRange = MONTHS.filter(function(mo){
+      var ts = monthTs(mo); return ts !== null && ts >= minTs && ts <= maxTs; });
+    var from, to;
+    if(inRange.length){ from = inRange[0]; to = inRange[inRange.length - 1]; }
+    else {
+      from = tsToMonth(minTs); to = tsToMonth(maxTs);
+      if(MONTHS.length){
+        if(from < MONTHS[0]) from = MONTHS[0];
+        if(to > MONTHS[MONTHS.length - 1]) to = MONTHS[MONTHS.length - 1];
+      }
+    }
+    state.monthFrom = from; state.monthTo = to;
+    buildFilterBar(); rerender();
+  }
+
+  // ---------- filter UI ----------
+  function facetBtnLabel(def){
+    var sel = state[def.key];
+    return def.label + (sel.size ? ' <span class="cnt">(' + sel.size + ')</span>' : ' <span class="cnt muted">· all</span>');
+  }
+  function buildFilterBar(){
+    var bar = document.getElementById("filterbar");
+    bar.innerHTML = "";
+    var lab = document.createElement("span"); lab.className = "fb-label"; lab.textContent = "Filter:";
+    bar.appendChild(lab);
+
+    FACET_DEFS.forEach(function(def){
+      var values = FACETS[def.key]; if(!values.length) return;
+      var wrap = document.createElement("div"); wrap.className = "facet"; wrap.setAttribute("data-facet", def.key);
+      var btn = document.createElement("button"); btn.type = "button"; btn.className = "btn facet-btn";
+      btn.innerHTML = facetBtnLabel(def);
+      var menu = document.createElement("div"); menu.className = "facet-menu";
+      var mini = document.createElement("div"); mini.className = "mini";
+      var all = document.createElement("a"); all.textContent = "all"; var none = document.createElement("a"); none.textContent = "none";
+      mini.appendChild(all); mini.appendChild(none); menu.appendChild(mini);
+      values.forEach(function(v){
+        var l = document.createElement("label");
+        var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = v;
+        cb.checked = state[def.key].has(v);
+        cb.addEventListener("change", function(){
+          if(cb.checked) state[def.key].add(v); else state[def.key].delete(v);
+          btn.innerHTML = facetBtnLabel(def); rerender();
+        });
+        var sp = document.createElement("span"); sp.textContent = v;
+        l.appendChild(cb); l.appendChild(sp); menu.appendChild(l);
+      });
+      all.addEventListener("click", function(){ state[def.key] = new Set(); // all = no constraint
+        menu.querySelectorAll("input").forEach(function(cb){ cb.checked = false; });
+        btn.innerHTML = facetBtnLabel(def); rerender(); });
+      none.addEventListener("click", function(){ state[def.key] = new Set([" none "]); // impossible value
+        menu.querySelectorAll("input").forEach(function(cb){ cb.checked = false; });
+        btn.innerHTML = facetBtnLabel(def); rerender(); });
+      btn.addEventListener("click", function(ev){ ev.stopPropagation();
+        var open = wrap.classList.contains("open");
+        closeMenus(); if(!open) wrap.classList.add("open"); });
+      wrap.appendChild(btn); wrap.appendChild(menu); bar.appendChild(wrap);
+    });
+
+    // month range
+    function monthSelect(id, label, def){
+      var l = document.createElement("label"); l.className = "fb-label"; l.style.textTransform = "none";
+      l.style.letterSpacing = "0"; l.textContent = label + " ";
+      var s = document.createElement("select"); s.id = id;
+      var any = document.createElement("option"); any.value = ""; any.textContent = "—"; s.appendChild(any);
+      MONTHS.forEach(function(mo){ var o = document.createElement("option"); o.value = mo; o.textContent = mo; s.appendChild(o); });
+      s.value = def || "";
+      s.addEventListener("change", function(){
+        state.monthFrom = document.getElementById("month-from").value || null;
+        state.monthTo = document.getElementById("month-to").value || null;
+        rerender();
+      });
+      l.appendChild(s); return l;
+    }
+    bar.appendChild(monthSelect("month-from", "From"));
+    bar.appendChild(monthSelect("month-to", "To"));
+
+    // Amount range (compares the transaction's magnitude, in dollars).
+    function amtInput(id, ph, centsVal){
+      var i = document.createElement("input"); i.type = "number"; i.id = id; i.min = "0"; i.step = "0.01";
+      i.placeholder = ph; i.style.width = "84px";
+      if(centsVal != null) i.value = (centsVal / 100).toString();
+      var t;
+      i.addEventListener("input", function(){
+        clearTimeout(t); t = setTimeout(function(){
+          state.amtMin = document.getElementById("amt-min").value === "" ? null : toCents(document.getElementById("amt-min").value);
+          state.amtMax = document.getElementById("amt-max").value === "" ? null : toCents(document.getElementById("amt-max").value);
+          rerender();
+        }, 200);
+      });
+      return i;
+    }
+    var amtLabel = document.createElement("span"); amtLabel.className = "fb-label"; amtLabel.textContent = "Amount $";
+    bar.appendChild(amtLabel);
+    bar.appendChild(amtInput("amt-min", "min", state.amtMin));
+    bar.appendChild(amtInput("amt-max", "max", state.amtMax));
+
+    var search = document.createElement("input"); search.type = "text"; search.id = "search";
+    search.placeholder = "merchant regex…"; search.value = state.search; search.title = "Case-insensitive regular expression matched against the merchant";
+    var st;
+    search.addEventListener("input", function(){
+      clearTimeout(st); st = setTimeout(function(){
+        state.search = search.value.trim();
+        compileSearch();
+        search.style.borderColor = SEARCH_BAD ? "var(--neg)" : "var(--line)";
+        rerender();
+      }, 200);
+    });
+    bar.appendChild(search);
+
+    var reset = document.createElement("button"); reset.type = "button"; reset.className = "btn"; reset.textContent = "Reset";
+    reset.addEventListener("click", function(){
+      state.persons = new Set(); state.accounts = new Set(); state.categories = new Set();
+      state.subcategories = new Set(); state.kinds = new Set();
+      state.monthFrom = null; state.monthTo = null; state.search = "";
+      state.amtMin = null; state.amtMax = null;
+      buildFilterBar(); rerender();
+    });
+    bar.appendChild(reset);
+  }
+  function closeMenus(){ document.querySelectorAll(".facet.open").forEach(function(f){ f.classList.remove("open"); }); }
+  document.addEventListener("click", function(){
+    closeMenus();
+    document.querySelectorAll(".flow .edge-g.sel").forEach(function(x){ x.classList.remove("sel"); });
+  });
+
+  function renderActiveBar(filteredLen){
+    var el = document.getElementById("activebar"); el.innerHTML = "";
+    function pill(label, key, val){
+      var p = document.createElement("span"); p.className = "pill";
+      p.innerHTML = '<b>'+esc(label)+':</b> '+esc(val)+' <span class="x">×</span>';
+      p.querySelector(".x").addEventListener("click", key);
+      el.appendChild(p);
+    }
+    FACET_DEFS.forEach(function(def){
+      var sel = state[def.key]; if(!sel.size) return;
+      var vals = Array.from(sel).filter(function(v){ return v !== " none "; });
+      var txt = sel.has(" none ") ? "none" : vals.join(", ");
+      pill(def.label, function(){ state[def.key] = new Set(); buildFilterBar(); rerender(); }, txt);
+    });
+    if(state.monthFrom || state.monthTo)
+      pill("Months", function(){ state.monthFrom = null; state.monthTo = null; buildFilterBar(); rerender(); },
+        (state.monthFrom||"…") + " → " + (state.monthTo||"…"));
+    if(state.amtMin != null || state.amtMax != null)
+      pill("Amount", function(){ state.amtMin = null; state.amtMax = null; buildFilterBar(); rerender(); },
+        "$" + (state.amtMin != null ? (state.amtMin/100) : "…") + " – $" + (state.amtMax != null ? (state.amtMax/100) : "…"));
+    if(state.search)
+      pill("Merchant /re/", function(){ state.search = ""; buildFilterBar(); rerender(); },
+        state.search + (SEARCH_BAD ? " (invalid — using substring)" : ""));
+    if(anyFilterActive()){
+      var note = document.createElement("span"); note.className = "scope-note";
+      note.textContent = filteredLen + " of " + TX.length + " transactions";
+      el.appendChild(note);
+    }
+  }
+
+  // ---------- orchestration ----------
+  var lastRows = [];
+  function rerender(){
+    compileSearch();
+    var rows = TX.filter(passes);
+    lastRows = rows;
+    var f = computeFlows(rows);
+    lastMonthly = f.monthly;
+    renderCards(f);
+    renderSpend(f, rows);
+    renderIncome(f, rows);
+    renderTransfers(rows);
+    renderEtransfers(rows);
+    renderRecurring(rows);
+    renderAnomalies(rows);
+    renderTrends(rows);
+    renderByEntity("by-person-panel", "person", "Person", rows);
+    renderByEntity("by-account-panel", "account", "Account", rows);
+    renderMerchants(rows);
+    renderAllTxns(rows);
+    renderActiveBar(rows.length);
+    drawChart();
+  }
+
+  // Make each data section (h2.sec-h) collapse its panel; closed by default.
+  function initSections(){
+    document.querySelectorAll("h2.sec-h").forEach(function(h){
+      h.insertAdjacentHTML("afterbegin", '<span class="caret">▾</span> ');
+      var panel = h.nextElementSibling;
+      h.classList.add("closed");
+      if(panel) panel.classList.add("sec-closed");
+      h.addEventListener("click", function(ev){
+        // Clicking the help icon shows its tooltip; don't toggle the section.
+        if(ev.target.closest(".help")) return;
+        h.classList.toggle("closed");
+        if(panel) panel.classList.toggle("sec-closed");
+      });
+    });
+  }
+
+  buildFilterBar();
+  initSections();
+  rerender();
+
+  var rb = document.getElementById("range-buttons");
+  if(rb){ rb.addEventListener("click", function(ev){
+    var b = ev.target.closest("button[data-range]"); if(!b) return;
+    rb.querySelectorAll("button").forEach(function(x){ x.classList.remove("active"); });
+    b.classList.add("active"); drawChart();
+  }); }
+
+  // A chart drag can end outside the plot; uPlot tracks the release on the
+  // document, so we do too. Bound once (never leaks) and reads the live instance.
+  document.addEventListener("mouseup", function(){
+    if(!chartDragging) return;
+    chartDragging = false;
+    var u = uplotInst;
+    if(u && u.select && u.select.width > 8){
+      applyChartRange(u.posToVal(u.select.left, "x"),
+                      u.posToVal(u.select.left + u.select.width, "x"));
+    }
+  });
+
+  window.addEventListener("resize", function(){
+    if(uplotInst && chartEl){ uplotInst.setSize({ width: chartEl.clientWidth||640, height: 300 }); }
+    renderTransfers(lastRows);
+  });
+
+  var tt = document.getElementById("theme-toggle");
+  if(tt){ tt.addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+    drawChart();
+  }); }
+})();
+</script>
+</body>
+</html>

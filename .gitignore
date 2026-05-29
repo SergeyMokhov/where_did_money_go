@@ -7,9 +7,12 @@ review_queue.json
 insights.json
 learned.toml
 report.html
+# ...but the report TEMPLATE is SOURCE, not a rendered artifact — keep it tracked
+# even though it shares the "report.html" name with the generated output above.
+!wdmg/src/report/templates/report.html
 
-# Playground: generated demo data (the generator + config are the source of truth)
-/playground/data/
+# Playground: the demo data is committed (generate once, use forever — it's
+# seeded/deterministic). Only the per-run analysis artifacts below stay ignored.
 
 # Editor / OS cruft
 *.swp

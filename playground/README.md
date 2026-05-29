@@ -21,23 +21,28 @@ places, or account numbers — just Fry, Leela, Bender & co.
 
 ## The story (and the features it shows off)
 
-Fry (`fry`) and Leela (`leela`) share a household budget across five accounts
-(two credit cards, a joint chequing + savings ledger, and Leela's card). Bender
-and assorted creatures are external counterparties.
+Set in the year **2999**. **Fry** (`fry`), **Leela** (`leela`) and **Bender**
+(`bender`) each have their own income and accounts; Professor Farnsworth signs the
+Planet Express payroll. Fry & Leela share a joint chequing + savings; Bender keeps
+his own ledger. Zoidberg, the casinos and the fembots are external counterparties.
 
 | What happens | Feature it demonstrates |
 |---|---|
-| Planet Express pays salaries twice a month | recurring **income**, cash-flow chart |
-| **Bender pays rent to Fry** in 2022–2023, then **Fry pays rent to Bender** in 2024–2025 (Fry moved out) | rent flips from **income → spend**; **trends** & recurring detection both ways |
-| Fry inherits from the estate of Yancy Fry Sr (2024-06) | one-time income spike → **anomaly**, headline impact |
-| Hypnotoad TV / Slurmstream / Bending Gym every month | **recurring / subscriptions** |
-| Mars Vegas resort blowout (2023-12) and a jewellery splurge (2024-02) | **spend anomalies** |
-| e-Transfers to Zoidberg, Amy, Hermes, Nibbler… | **E-transfers grouped by recipient** — no config needed |
-| e-Transfers to Leela | household transfer attributed via a `transfer_rule` |
+| Farnsworth pays Fry, Leela & Bender twice a month; Bender also earns a 2nd salary bending girders at IRONWORKS | recurring **income**, **by-person/-account**, cash-flow chart |
+| **Bender pays rent to Fry** in 2997–2998, then **Fry pays rent to Bender** in 2999 (Fry moves to the Robot Arms Apts) | rent flips from **income → spend**; **trends** both ways |
+| Bender gambles, drinks and e-Transfers his way into **bankruptcy** (see the puzzles) | **negative net**, spend-vs-transfer distinction, trends |
+| Fry inherits **$50k** from the Estate of Yancy Fry Sr (2999-06) | one-time income spike → **anomaly** |
+| Hypnotoad TV / Slurmstream / EyePhone / shuttle fuel every month | **recurring / subscriptions** |
+| Mars Vegas resort blowout (2998-08) and a jewellery splurge (2999-02) | **spend anomalies** |
+| e-Transfers to Zoidberg / Leela / fembots | **E-transfers grouped by recipient**; one `transfer_rule` attributes Leela |
 | Monthly credit-card payment; chequing → savings move | **matched transfer pairs** + the flow graph |
 | RRSP / TFSA contributions | **external** transfer destinations |
-| Groceries, restaurants, coffee, gas, utilities, telecom | **category → subcategory** breakdowns |
+| Leela's pet **Nibbler** (vet, chow); Fry's gas-station sandwiches | **category → subcategory** breakdowns |
 | An overlapping “recent” chequing export | cross-file **dedup** report |
 
-Everything is deterministic (the generator is seeded), so re-running produces an
-identical dataset. Tune `generate_data.py` to invent your own scenarios.
+There are a few **hidden puzzles** planted in the data — see
+[`spoilers.md`](./spoilers.md) once you've tried to solve them yourself.
+
+The data under `data/` is committed (generate once, use forever). It's
+deterministic (the generator is seeded `random.seed(2999)`), so re-running
+`generate_data.py` reproduces it exactly. Tune the generator to invent your own.

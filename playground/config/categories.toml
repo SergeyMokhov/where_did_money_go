@@ -1,4 +1,4 @@
-# where-did-money-go — PLAYGROUND categories (Futurama-themed demo data)
+# where-did-money-go — PLAYGROUND categories (Futurama-themed demo data, year 2999)
 #
 # Tuned to the merchants emitted by generate_data.py. Most-specific (longest)
 # matching pattern wins, then priority, then order. Unanchored, case-insensitive.
@@ -11,6 +11,11 @@ kind = "spend"
   [[category.subcategory]]
   name = "Gas"
   patterns = ["PLASMA FUEL", "PETRO-?EARTH", "FUEL DEPOT"]
+  [[category.subcategory]]
+  name = "Starship Fuel"
+  # Dark-matter fuel for the Planet Express delivery shuttle. Longer than the
+  # bare "FUEL DEPOT" gas pattern, so it wins.
+  patterns = ["DARK MATTER FUEL", "ANTIMATTER", "SHUTTLE FUEL"]
 
 [[category]]
 name = "Groceries"
@@ -29,10 +34,38 @@ kind = "spend"
   [[category.subcategory]]
   name = "Restaurants"
   patterns = ["ELZAR", "PANUCCI", "JACKRABBIT", "DINER", "RESTAURANT", "PIZZA"]
+  [[category.subcategory]]
+  name = "Gas-Station Snacks"
+  # The gas-station sandwich counter — a certain delivery boy's weakness.
+  patterns = ["GAS-N-GULP", "SANDWICH", "SLURM SHACK"]
+
+[[category]]
+name = "Pets"
+kind = "spend"
+  [[category.subcategory]]
+  # Matches the default subcategory name so Nibbler's vet bills (also caught by
+  # the default "VET" pattern) don't split into two rows.
+  name = "Pet Supplies & Vet"
+  # Leela's pet Nibbler: vet, exotic chow, supplies.
+  patterns = ["PETOPIA", "NIBBLONIAN CHOW", "INTERSPECIES VET", "VET ", "PET SUPPL"]
 
 [[category]]
 name = "Indulgence"
 kind = "spend"
+  [[category.subcategory]]
+  # Named to match the shipped default subcategory so casino spend that the
+  # default "CASINO" pattern also catches merges into one row, not two.
+  name = "Lottery & Gaming"
+  patterns = ["CASINO", "BLACKJACK", "POKER", "SLOTS", "LOTTERY", "BET PALACE"]
+  [[category.subcategory]]
+  name = "Alcohol & Cannabis"
+  patterns = ["LOBRAU", "LIQUOR", "BREWERY", "BEER", "BOOZE"]
+  [[category.subcategory]]
+  name = "Cigars & Smokes"
+  patterns = ["CIGAR", "STOGIE", "SMOKE SHOP"]
+  [[category.subcategory]]
+  name = "Hobbies & Fun"
+  patterns = ["COMIX", "ARCADE", "FUN CENTER", "GAME STOP"]
   [[category.subcategory]]
   name = "Travel"
   patterns = ["MARS VEGAS", "RESORT", "SPACE CRUISE"]
@@ -48,14 +81,14 @@ kind = "spend"
   patterns = ["HYPNOTOAD", "SLURMSTREAM", "EYEPHONE PLUS"]
   [[category.subcategory]]
   name = "Fitness"
-  patterns = ["BENDING GYM", "GYM"]
+  patterns = ["BENDING GYM", "KENDO DOJO", "DOJO", "GYM"]
 
 [[category]]
 name = "Self-care"
 kind = "spend"
   [[category.subcategory]]
   name = "Clothing"
-  patterns = ["WINNERS", "MARSHALLS"]
+  patterns = ["WINNERS", "MARSHALLS", "FORTYNINER SPORTS"]
 
 [[category]]
 name = "Online Shopping"
@@ -86,7 +119,7 @@ name = "Income"
 kind = "income"
   [[category.subcategory]]
   name = "Salary"
-  patterns = ["PLANET EXPRESS PAYROLL", "PAYROLL", "DIRECT DEPOSIT"]
+  patterns = ["PLANET EXPRESS PAYROLL", "IRONWORKS", "PAYROLL", "DIRECT DEPOSIT"]
   [[category.subcategory]]
   name = "Rent Income"
   # "RENT DEPOSIT" / "RENT FROM" are longer than the bare "RENT" spend pattern,

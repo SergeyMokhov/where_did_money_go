@@ -46,11 +46,14 @@ display_name = "Turanga Leela"
 [[person]]
 id = "bender"
 display_name = "Bender Rodríguez"
-  # External — Bender has no exports here, but is a transfer counterparty.
+  # Bender's own bank ledger (bender_ledger_3344.csv): two salaries in, and a
+  # great deal out. Matched by filename so it isn't mistaken for the joint
+  # chequing (its name deliberately avoids the word "chequing").
   [[person.account]]
-  id = "bender_account"
-  external = true
-  kind = "other"
+  id = "Bender Ledger"
+  filename = "(?i)bender"
+  profile = "bank_ledger"
+  kind = "debit"
 
 # External investment accounts (declared, never sourced from a file).
 [[person]]
