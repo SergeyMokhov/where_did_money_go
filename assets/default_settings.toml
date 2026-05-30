@@ -1,0 +1,16 @@
+# where-did-money-go — analysis settings (optional)
+#
+# analysis_profile tunes which "Unusual activity" detectors run:
+#   consumer  - fraud + waste (duplicates, unfamiliar merchants, card-testing,
+#               subscription price hikes, big one-offs, deficit streaks)   [default]
+#   prosumer  - same set as consumer (subscription-heavy)
+#   business  - consumer set PLUS forensic/compliance: Benford's law on amounts,
+#               near-threshold "structuring", round-number transfers
+#   public    - business set, with disclosure emphasis (public figures)
+#
+# structuring_threshold: the cash/transfer reporting threshold the structuring
+# detector watches just below (default 10000 = Canada FINTRAC / US CTR). Only used
+# by the business/public profiles.
+
+analysis_profile = "consumer"
+structuring_threshold = "10000"

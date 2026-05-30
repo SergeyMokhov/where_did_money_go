@@ -277,6 +277,7 @@ fn cmd_init(dir: &Path) -> Result<()> {
         ("categories.toml", defaults::categories()),
         ("people.toml", defaults::people()),
         ("events.toml", defaults::events()),
+        ("settings.toml", defaults::settings()),
     ];
 
     for (name, contents) in files {

@@ -21,6 +21,7 @@ pub mod trends;
 use serde::{Deserialize, Serialize};
 
 use crate::categorize::{Assignment, EffectiveKind};
+use crate::config::AnalysisSettings;
 use crate::error::AnalyticsError;
 use crate::model::{Currency, Money, Transaction};
 
@@ -161,7 +162,11 @@ pub fn single_currency(txns: &[Transaction]) -> Result<Currency, AnalyticsError>
 /// Transfers are excluded from flows/categories/merchants/recurring/anomalies/
 /// trends. The caller supplies the same `(txn, assignment)` pairing used
 /// everywhere downstream.
-pub fn compute(items: &[Categorized<'_>], currency: &Currency) -> Analytics {
+pub fn compute(
+    items: &[Categorized<'_>],
+    currency: &Currency,
+    settings: &AnalysisSettings,
+) -> Analytics {
     // Spend/income view excludes transfers and unknown rows.
     let flow_items: Vec<Categorized<'_>> = items
         .iter()
@@ -186,7 +191,10 @@ pub fn compute(items: &[Categorized<'_>], currency: &Currency) -> Analytics {
     // anomaly detection — a stable repeated charge is not an anomaly.
     let recurring_merchants: std::collections::BTreeSet<String> =
         recurring.iter().map(|r| r.merchant.clone()).collect();
-    let anomalies = anomaly::detect(&flow_items, &recurring_merchants);
+    // Anomaly detection sees ALL items (some detectors — structuring, round-number
+    // transfers — operate on transfers, which the flow view excludes); each pass
+    // filters by kind as needed.
+    let anomalies = anomaly::detect(items, &recurring_merchants, settings);
     let trends = trends::compute(&flow_items);
     let by_person = flows::by_person(&flow_items);
     let by_account = flows::by_account(&flow_items);

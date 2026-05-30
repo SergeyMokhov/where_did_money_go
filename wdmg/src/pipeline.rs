@@ -64,7 +64,7 @@ pub fn analyze(config: &Config, input_dir: &Path) -> Result<AnalyzeOutcome, Wdmg
     let reconciliation = reconcile::reconcile(&items, config, &roster);
 
     // 7. Analytics (transfers excluded inside).
-    let analytics = analytics::compute(&items, &currency);
+    let analytics = analytics::compute(&items, &currency, &config.settings);
 
     // 8. Emit documents (owns its data; borrows end here).
     let review_queue = emit::build_review_queue(&items, &reconciliation);

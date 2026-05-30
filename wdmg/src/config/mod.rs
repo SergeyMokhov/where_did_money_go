@@ -13,6 +13,7 @@ pub mod categories;
 pub mod events;
 pub mod people;
 pub mod profiles;
+pub mod settings;
 
 use std::path::{Path, PathBuf};
 
@@ -26,6 +27,7 @@ pub use people::{Account, PeopleDoc, Person, TransferRule};
 pub use profiles::{
     AccountSpec, AmountSpec, DateSpec, MemoSpec, MerchantSpec, Profile, ProfilesDoc, Sign, TypeSpec,
 };
+pub use settings::{AnalysisProfile, AnalysisSettings, SettingsDoc};
 
 /// Embedded default `profiles.toml` (shipped asset).
 pub const DEFAULT_PROFILES: &str = include_str!("../../../assets/default_profiles.toml");
@@ -35,6 +37,8 @@ pub const DEFAULT_CATEGORIES: &str = include_str!("../../../assets/default_categ
 pub const DEFAULT_PEOPLE: &str = include_str!("../../../assets/default_people.toml");
 /// Embedded default `events.toml` (shipped asset).
 pub const DEFAULT_EVENTS: &str = include_str!("../../../assets/default_events.toml");
+/// Embedded default `settings.toml` (shipped asset).
+pub const DEFAULT_SETTINGS: &str = include_str!("../../../assets/default_settings.toml");
 
 /// Accessor for the embedded default config files, used by `wdmg init`.
 pub mod defaults {
@@ -57,6 +61,11 @@ pub mod defaults {
     #[must_use]
     pub fn events() -> &'static str {
         super::DEFAULT_EVENTS
+    }
+    /// The default `settings.toml` contents.
+    #[must_use]
+    pub fn settings() -> &'static str {
+        super::DEFAULT_SETTINGS
     }
 }
 
@@ -114,6 +123,8 @@ pub struct Config {
     pub account_matchers: Vec<CompiledAccountMatcher>,
     /// Validated, date-sorted life events (annotation only; may be empty).
     pub events: Vec<LifeEvent>,
+    /// Analysis settings (persona profile + jurisdiction params).
+    pub settings: AnalysisSettings,
 }
 
 /// Compile a case-insensitive regex, mapping failures to a typed error.
@@ -362,6 +373,7 @@ impl Config {
             transfer_rules,
             account_matchers,
             events: Vec::new(),
+            settings: AnalysisSettings::default(),
         })
     }
 
@@ -390,8 +402,14 @@ impl Config {
             .unwrap_or_default()
             .validated()?;
 
+        // Optional analysis settings (persona profile + jurisdiction params).
+        let settings = read_toml::<SettingsDoc>(&dir.join("settings.toml"))?
+            .unwrap_or_default()
+            .validated();
+
         let mut config = Self::build(profiles_doc, categories, people)?;
         config.events = events;
+        config.settings = settings;
         Ok(config)
     }
 

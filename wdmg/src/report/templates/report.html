@@ -237,7 +237,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="panel" id="recurring-panel"></div>
 
   <!-- Anomalies -->
-  <h2 class="sec-h">Unusual activity <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Single transactions far larger than usual, an unusually expensive month, or a big one-off purchase in a category you rarely use (e.g. a jewellery or travel splurge). Robust tests that aren't thrown off by the outlier itself; recurring bills are excluded so a steady payment isn't flagged. Use it to catch mistakes, fraud or one-off splurges — a flag isn't always a problem, just worth a look.">i</span></h2>
+  <h2 class="sec-h">Unusual activity <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="A battery of robust, explainable checks: outlier amounts, an expensive month, a rare big-ticket purchase, duplicate charges, an unfamiliar new large payee, subscription price hikes, card-testing bursts, season-adjusted spikes, sustained spending shifts and deficit streaks — plus (for the business/public profile) Benford's-law, near-threshold and round-number checks. The 'Why' column explains each flag; rows are sorted most-serious first and follow the filter bar. A flag isn't always a problem — just worth a look.">i</span></h2>
   <div class="panel" id="anomalies-panel"></div>
 
   <!-- Trends: spending (out) and income (in) as separate sections -->
@@ -602,84 +602,40 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     return out;
   }
 
-  function detectAnomalies(rows){
-    var out = [];
-    // Stable recurring/subscription charges are not anomalies — exclude their
-    // merchants from the single-transaction pass (mirrors the Rust detector).
-    var recurringMerchants = {};
-    detectRecurring(rows).forEach(function(r){ recurringMerchants[r.merchant] = 1; });
-    // (a) per-SUBCATEGORY single-transaction MAD z-score — like-for-like spend, so a
-    // pricey-but-normal subcategory isn't flagged against a cheaper one in the same category.
-    var bySub = {};
-    rows.forEach(function(t){ if(t.kind !== "spend") return;
-      if(recurringMerchants[t.merchant]) return;
-      var key = t.subcategory || "Uncategorized";
-      (bySub[key] || (bySub[key] = [])).push([Math.abs(toCents(t.amount)), t.date, t.merchant]); });
-    Object.keys(bySub).forEach(function(sub){
-      var arr = bySub[sub]; if(arr.length < 4) return;
-      var mags = arr.map(function(r){ return r[0]; });
-      var med = median(mags);
-      var devs = mags.map(function(x){ return Math.abs(x - med); });
-      var madVal = median(devs);
-      var denom = 1.4826 * madVal; if(denom === 0) return;
-      arr.forEach(function(r){
-        var z = Math.abs(r[0] - med) / denom;
-        if(z > 3.5) out.push({method:"mad_zscore", category:sub, period_or_date:r[1],
-          amount:r[0], baseline:med, severity:z.toFixed(2), merchant:r[2]});
-      });
-    });
-    // (b) per-category monthly IQR fence
-    var catMonth = {};
-    rows.forEach(function(t){ if(t.kind !== "spend") return;
-      var cm = catMonth[t.category] || (catMonth[t.category] = {});
-      cm[t.month] = (cm[t.month] || 0) + Math.abs(toCents(t.amount)); });
-    Object.keys(catMonth).forEach(function(cat){
-      var months = catMonth[cat], keys = Object.keys(months);
-      if(keys.length < 4) return;
-      var totals = keys.map(function(k){ return months[k]; });
-      var q1 = quantile(totals, 0.25), q3 = quantile(totals, 0.75);
-      var fence = q3 + 1.5 * (q3 - q1); if(fence === 0) return;
-      keys.sort().forEach(function(mo){
-        if(months[mo] > fence) out.push({method:"monthly_iqr", category:cat, period_or_date:mo,
-          amount:months[mo], baseline:fence, severity:(months[mo]/fence).toFixed(2), merchant:null});
-      });
-    });
-    // (c) rare-subcategory large purchases: a big one-off in a subcategory too
-    // small for the MAD pass (< 4 txns) has no peers to be an outlier against — yet
-    // a $3,000 charge in a subcategory you almost never use is exactly the unusual
-    // activity worth surfacing. Flag it when its magnitude is a strong UPPER outlier
-    // of the GLOBAL non-recurring spend distribution, in log space (purchase sizes
-    // are heavily right-skewed). Upper tail only; mirrors the Rust `rare_large`.
-    var subCount = {}, logs = [];
-    rows.forEach(function(t){ if(t.kind !== "spend") return;
-      if(recurringMerchants[t.merchant]) return;
-      var key = t.subcategory || "Uncategorized";
-      subCount[key] = (subCount[key] || 0) + 1;
-      var c = Math.abs(toCents(t.amount)); if(c > 0) logs.push(Math.log(c)); });
-    if(logs.length >= 10){
-      var lmed = median(logs);
-      var lmad = median(logs.map(function(x){ return Math.abs(x - lmed); }));
-      var lden = 1.4826 * lmad;
-      if(lden > 0){
-        var typical = Math.round(Math.exp(lmed)); // global typical magnitude, cents
-        rows.forEach(function(t){ if(t.kind !== "spend") return;
-          if(recurringMerchants[t.merchant]) return;
-          var key = t.subcategory || "Uncategorized";
-          if((subCount[key] || 0) >= 4) return; // big enough -> MAD pass owns it
-          var c = Math.abs(toCents(t.amount)); if(c <= 0) return;
-          var z = (Math.log(c) - lmed) / lden;
-          if(z > 3.0) out.push({method:"rare_large", category:key, period_or_date:t.date,
-            amount:c, baseline:typical, severity:z.toFixed(2), merchant:t.merchant});
-        });
-      }
-    }
-    out.sort(function(a,b){
-      return (a.method < b.method ? -1 : a.method > b.method ? 1 :
-        a.category < b.category ? -1 : a.category > b.category ? 1 :
-        a.period_or_date < b.period_or_date ? -1 : a.period_or_date > b.period_or_date ? 1 :
-        b.amount - a.amount); });
-    return out;
+  // Anomalies are computed once by the Rust engine (a battery of detectors tuned by
+  // the persona profile) and embedded in the island. The report does NOT recompute
+  // them — it filters the precomputed list to the active selection, so every flag is
+  // explained identically to how the engine justified it. `scope` decides how a row
+  // is filtered: a transaction-scoped flag follows its txn's facets; a month/dataset
+  // flag follows only category + month range.
+  var ANOM = Array.isArray(A.anomalies) ? A.anomalies : [];
+  function anomalyMonthInRange(mo){
+    if(!(state.monthFrom || state.monthTo)) return true;
+    var inM = (!state.monthFrom || mo >= state.monthFrom) && (!state.monthTo || mo <= state.monthTo);
+    return state.negMonths ? !inM : inM;
   }
+  function anomalyPasses(a){
+    if(a.category && !facetPass("categories", a.category)) return false;
+    if(a.scope === "dataset") return true; // spans the whole selection
+    if(a.scope === "month") return anomalyMonthInRange((a.period_or_date || "").slice(0,7));
+    // transaction scope: follow the underlying transaction's facets.
+    if(!facetPass("persons", a.person || "unassigned")) return false;
+    if(!facetPass("accounts", a.account || "unassigned")) return false;
+    if(a.subcategory && !facetPass("subcategories", a.subcategory)) return false;
+    if(!anomalyMonthInRange((a.period_or_date || "").slice(0,7))) return false;
+    if(state.amtMin != null || state.amtMax != null){
+      var mag = Math.abs(toCents(a.amount));
+      var inA = (state.amtMin == null || mag >= state.amtMin) && (state.amtMax == null || mag <= state.amtMax);
+      if(state.negAmt ? inA : !inA) return false;
+    }
+    var m = a.merchant || "";
+    if(state.search){ if(SEARCH_RE){ if(!SEARCH_RE.test(m)) return false; }
+      else if(m.toUpperCase().indexOf(state.search.toUpperCase()) === -1) return false; }
+    if(state.searchExclude){ if(EXCL_RE){ if(EXCL_RE.test(m)) return false; }
+      else if(m.toUpperCase().indexOf(state.searchExclude.toUpperCase()) !== -1) return false; }
+    return true;
+  }
+  function detectAnomalies(){ return ANOM.filter(anomalyPasses); }
 
   // The most recent COMPLETE month in `rows`. A trailing month is "partial" when
   // the latest transaction date isn't that month's last day (e.g. the current
@@ -878,17 +834,38 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       '</tbody></table>';
   }
 
-  var METHOD_LABEL = { mad_zscore:"unusual amount", monthly_iqr:"expensive month", rare_large:"rare big purchase" };
-  function renderAnomalies(rows){
+  var METHOD_LABEL = { mad_zscore:"unusual amount", monthly_iqr:"expensive month", rare_large:"rare big purchase",
+    duplicate_charge:"duplicate charge", first_seen_large:"new large payee", subscription_increase:"price increase",
+    card_testing:"card testing", structuring:"near threshold", round_number:"round-number transfer",
+    benford:"Benford anomaly", change_point:"spending shift", seasonal_residual:"seasonal spike",
+    cashflow_runway:"deficit streak" };
+  // Severity colour by method importance (the raw severity scales differ across
+  // detectors, so a single numeric cutoff would mislead). mad_zscore keeps its z.
+  var METHOD_SEV = { duplicate_charge:"sev-high", structuring:"sev-high", card_testing:"sev-high",
+    cashflow_runway:"sev-high", rare_large:"sev-high", first_seen_large:"sev-medium",
+    benford:"sev-medium", change_point:"sev-medium", seasonal_residual:"sev-medium",
+    monthly_iqr:"sev-medium", subscription_increase:"sev-low", round_number:"sev-low" };
+  var SEV_RANK = { "sev-high":0, "sev-medium":1, "sev-low":2 };
+  function sevClass(a){
+    if(a.method === "mad_zscore"){ var z = parseFloat(a.severity); return z >= 6 ? "sev-high" : z >= 4 ? "sev-medium" : "sev-low"; }
+    return METHOD_SEV[a.method] || "sev-low";
+  }
+  function renderAnomalies(){
     var el = document.getElementById("anomalies-panel");
-    var a = detectAnomalies(rows);
+    var a = detectAnomalies().slice();
     if(!a.length){ el.innerHTML = '<div class="empty">Nothing unusual in the current selection.</div>'; return; }
-    el.innerHTML = '<table><thead><tr><th>When/where</th><th>Category</th><th class="num">Amount</th><th class="num">Baseline</th><th>Severity</th><th>Method</th></tr></thead><tbody>'+
-      a.map(function(x){ var sevNum = parseFloat(x.severity);
-        var sev = sevNum >= 5 ? "sev-high" : sevNum >= 2 ? "sev-medium" : "sev-low";
-        return '<tr><td>'+esc(x.period_or_date)+(x.merchant?' · <span class="muted">'+esc(x.merchant)+'</span>':"")+
-        '</td><td>'+esc(x.category)+'</td><td class="num">'+fmtMoney(x.amount)+'</td><td class="num muted">'+fmtMoney(x.baseline)+
-        '</td><td class="'+sev+'">'+esc(x.severity)+'</td><td><span class="tag">'+esc(METHOD_LABEL[x.method]||x.method)+'</span></td></tr>'; }).join("")+
+    // Most serious first, then biggest amount.
+    a.sort(function(x, y){
+      var rx = SEV_RANK[sevClass(x)], ry = SEV_RANK[sevClass(y)];
+      if(rx !== ry) return rx - ry;
+      return Math.abs(toCents(y.amount)) - Math.abs(toCents(x.amount));
+    });
+    el.innerHTML = '<table><thead><tr><th>When/where</th><th>Why</th><th class="num">Amount</th><th>Method</th></tr></thead><tbody>'+
+      a.map(function(x){
+        var when = esc(x.period_or_date) + (x.merchant ? ' · <span class="muted">'+esc(x.merchant)+'</span>' : "");
+        var amt = (x.method === "benford") ? '<span class="muted">—</span>' : fmtMoney(toCents(x.amount));
+        return '<tr><td>'+when+'</td><td class="'+sevClass(x)+'">'+esc(x.reason || x.category)+
+        '</td><td class="num">'+amt+'</td><td><span class="tag">'+esc(METHOD_LABEL[x.method]||x.method)+'</span></td></tr>'; }).join("")+
       '</tbody></table>';
   }
 
@@ -1557,7 +1534,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     renderTransfers(rows);
     renderEtransfers(rows);
     renderRecurring(rows);
-    renderAnomalies(rows);
+    renderAnomalies();
     renderTrends(rows);
     renderByEntity("by-person-panel", "person", "Person", rows);
     renderByEntity("by-account-panel", "account", "Account", rows);
