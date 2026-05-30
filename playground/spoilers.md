@@ -88,6 +88,11 @@ over three years.
   — see *Pets → Pet Supplies & Vet* under **Person = leela**.
 - **Cross-file dedup.** `joint_chequing_recent.csv` overlaps the last two months of
   `joint_chequing.csv`; the **dedup footer** reports the rows collapsed.
+- **Life-event markers.** `config/events.toml` plants four amber markers on the
+  cash-flow chart (crew hired, Mars Vegas getaway, Fry's inheritance, Bender's
+  factory job ending). Watch how Bender's marker sits right where his income drops
+  and the gambling peaks. Add your own (purple) markers from the report's
+  **Life events** control under the chart — they save in your browser.
 
 ---
 

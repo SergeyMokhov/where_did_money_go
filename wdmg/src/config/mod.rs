@@ -10,6 +10,7 @@
 //! never re-check raw config.
 
 pub mod categories;
+pub mod events;
 pub mod people;
 pub mod profiles;
 
@@ -20,6 +21,7 @@ use regex::{Regex, RegexBuilder};
 use crate::error::ConfigError;
 
 pub use categories::{CategoriesDoc, Category, CategoryKind, Subcategory};
+pub use events::{EventsDoc, LifeEvent};
 pub use people::{Account, PeopleDoc, Person, TransferRule};
 pub use profiles::{
     AccountSpec, AmountSpec, DateSpec, MemoSpec, MerchantSpec, Profile, ProfilesDoc, Sign, TypeSpec,
@@ -31,6 +33,8 @@ pub const DEFAULT_PROFILES: &str = include_str!("../../../assets/default_profile
 pub const DEFAULT_CATEGORIES: &str = include_str!("../../../assets/default_categories.toml");
 /// Embedded default `people.toml` (shipped asset).
 pub const DEFAULT_PEOPLE: &str = include_str!("../../../assets/default_people.toml");
+/// Embedded default `events.toml` (shipped asset).
+pub const DEFAULT_EVENTS: &str = include_str!("../../../assets/default_events.toml");
 
 /// Accessor for the embedded default config files, used by `wdmg init`.
 pub mod defaults {
@@ -48,6 +52,11 @@ pub mod defaults {
     #[must_use]
     pub fn people() -> &'static str {
         super::DEFAULT_PEOPLE
+    }
+    /// The default `events.toml` contents.
+    #[must_use]
+    pub fn events() -> &'static str {
+        super::DEFAULT_EVENTS
     }
 }
 
@@ -103,6 +112,8 @@ pub struct Config {
     pub transfer_rules: Vec<CompiledTransferRule>,
     /// Compiled per-account filename matchers (flattened across people).
     pub account_matchers: Vec<CompiledAccountMatcher>,
+    /// Validated, date-sorted life events (annotation only; may be empty).
+    pub events: Vec<LifeEvent>,
 }
 
 /// Compile a case-insensitive regex, mapping failures to a typed error.
@@ -350,6 +361,7 @@ impl Config {
             people,
             transfer_rules,
             account_matchers,
+            events: Vec::new(),
         })
     }
 
@@ -373,7 +385,14 @@ impl Config {
         let user: Option<CategoriesDoc> = read_toml(&dir.join("categories.toml"))?;
         let categories = defaults.merge(learned, user);
 
-        Self::build(profiles_doc, categories, people)
+        // Optional life-event annotations (validated + date-sorted; empty if absent).
+        let events = read_toml::<EventsDoc>(&dir.join("events.toml"))?
+            .unwrap_or_default()
+            .validated()?;
+
+        let mut config = Self::build(profiles_doc, categories, people)?;
+        config.events = events;
+        Ok(config)
     }
 
     /// Load a [`Config`] entirely from the embedded defaults (no filesystem).

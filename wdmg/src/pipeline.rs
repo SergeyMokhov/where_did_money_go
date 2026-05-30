@@ -68,7 +68,12 @@ pub fn analyze(config: &Config, input_dir: &Path) -> Result<AnalyzeOutcome, Wdmg
 
     // 8. Emit documents (owns its data; borrows end here).
     let review_queue = emit::build_review_queue(&items, &reconciliation);
-    let analysis = emit::build_analysis(analytics, reconciliation, dedup_report);
+    let analysis = emit::build_analysis(
+        analytics,
+        reconciliation,
+        dedup_report,
+        config.events.clone(),
+    );
 
     Ok(AnalyzeOutcome {
         analysis,

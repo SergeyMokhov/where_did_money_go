@@ -119,16 +119,42 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 .facet-menu label:hover{background:var(--chip);}
 .facet-menu .mini{display:flex;gap:6px;margin-bottom:6px;}
 .facet-menu .mini a{font-size:12px;color:var(--accent);cursor:pointer;text-decoration:underline;}
+.facet-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  font-size:11px;color:var(--muted);padding:0 6px 6px;border-bottom:1px solid var(--line);margin-bottom:4px;}
+.facet-head .col-h{letter-spacing:.02em;}
+.facet-clear{font-size:12px;color:var(--accent);cursor:pointer;text-decoration:underline;}
+.facet-menu label.facet-row{display:grid;grid-template-columns:18px 18px 1fr;gap:8px;align-items:center;}
+.facet-menu .f-inc{accent-color:var(--pos);}
+.facet-menu .f-exc{accent-color:var(--neg);}
+.facet-btn .cnt.pos{color:var(--pos);opacity:1;} .facet-btn .cnt.neg{color:var(--neg);opacity:1;}
 .filterbar select,.filterbar input[type=text]{background:var(--bg);color:var(--ink);border:1px solid var(--line);
   border-radius:8px;padding:5px 8px;font-size:13px;}
 .filterbar input[type=text]{min-width:140px;}
 .activebar{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-height:0;}
 .activebar .pill{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:#fff;border-radius:999px;
   padding:2px 6px 2px 10px;font-size:12px;}
+.activebar .pill.pill-neg{background:var(--neg);}
 .activebar .pill b{font-weight:600;}
 .activebar .pill .x{cursor:pointer;font-weight:700;opacity:.85;}
 .activebar .pill .x:hover{opacity:1;}
 .scope-note{color:var(--muted);font-size:12px;font-style:italic;}
+.events-ui{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;}
+.events-hdr{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.events-title{font-weight:600;font-size:13px;}
+.events-hdr .btn{margin-left:auto;}
+.events-form{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;}
+.events-form input[type=date],.events-form input[type=text]{background:var(--bg);color:var(--ink);
+  border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:13px;}
+.events-form input[type=text]{min-width:150px;}
+.events-err{color:var(--neg);font-size:12px;}
+.events-list{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.event-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);
+  border-radius:999px;padding:2px 8px;background:var(--chip);}
+.event-chip .ev-dot{width:8px;height:8px;border-radius:50%;flex:none;}
+.event-chip.ev-user .ev-dot{background:#8a63d2;} .event-chip.ev-config .ev-dot{background:#c98a2c;}
+.event-chip .x{cursor:pointer;font-weight:700;opacity:.7;margin-left:2px;} .event-chip .x:hover{opacity:1;color:var(--neg);}
+.event-chip .ev-tag{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+  border:1px solid var(--line);border-radius:6px;padding:0 4px;}
 </style>
 </head>
 <body>
@@ -162,7 +188,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="cards" id="cards"></div>
 
   <!-- Cash flow over time -->
-  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
+  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. Vertical markers are life events (amber = shared from config, purple = added by you) so you can see how a milestone lined up with your money. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
   <div class="panel">
     <div class="chips" id="range-buttons" style="margin-bottom:8px;">
       <button class="btn active" data-range="all" type="button">All</button>
@@ -180,6 +206,8 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     <div id="cashflow-chart"></div>
     <div class="muted" style="font-size:12px;margin-top:6px;">Tip: drag across the chart to filter every section to that date range.</div>
     <div class="empty" id="cashflow-empty" style="display:none;">No data in the current selection.</div>
+    <!-- Life events: labelled vertical markers on the chart (populated by the glue script). -->
+    <div id="events-ui" class="events-ui"></div>
   </div>
 
   <div class="grid2">
@@ -209,12 +237,15 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="panel" id="recurring-panel"></div>
 
   <!-- Anomalies -->
-  <h2 class="sec-h">Unusual activity <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Single transactions that are far larger than your usual spend in the same subcategory (a robust outlier test that isn't thrown off by the outlier itself). Recurring bills are excluded so a steady payment isn't flagged. Use it to catch mistakes, fraud or one-off splurges — a flag isn't always a problem, just worth a look.">i</span></h2>
+  <h2 class="sec-h">Unusual activity <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Single transactions far larger than usual, an unusually expensive month, or a big one-off purchase in a category you rarely use (e.g. a jewellery or travel splurge). Robust tests that aren't thrown off by the outlier itself; recurring bills are excluded so a steady payment isn't flagged. Use it to catch mistakes, fraud or one-off splurges — a flag isn't always a problem, just worth a look.">i</span></h2>
   <div class="panel" id="anomalies-panel"></div>
 
-  <!-- Trends -->
-  <h2 class="sec-h">Trends <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Whether each category is rising or falling over time — month-over-month and year-over-year change, plus the overall direction of the line. What to watch: categories trending up that you'd rather keep flat.">i</span></h2>
-  <div class="panel" id="trends-panel"></div>
+  <!-- Trends: spending (out) and income (in) as separate sections -->
+  <h2 class="sec-h">Spending trends (out) <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="How each spending category changed: month-over-month (latest full month vs the one before) and year-over-year (vs the same month last year). Each arrow sits on its own number — ↓ green means spending fell (good), ↑ red means it rose. MoM and YoY can point different ways (one month vs a whole year apart). The current partial month is excluded. What to watch: big red ↑ movers.">i</span></h2>
+  <div class="panel" id="trends-out-panel"></div>
+
+  <h2 class="sec-h">Income trends (in) <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="How each income source changed: month-over-month and year-over-year. Each arrow sits on its own number — ↑ green means income rose (good), ↓ red means it fell. MoM and YoY can point different ways. The current partial month is excluded. What to watch: a source you rely on with a red ↓.">i</span></h2>
+  <div class="panel" id="trends-in-panel"></div>
 
   <!-- By person / account -->
   <div class="grid2">
@@ -279,6 +310,38 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   var TX = Array.isArray(A.transactions) ? A.transactions : [];
   var RECON = A.transfers || {matched_pairs:[],external:[],unresolved:[],graph:{nodes:[],edges:[]}};
   var CURRENCY = A.currency || "";
+
+  // ---------- life events (vertical markers on the cash-flow chart) ----------
+  // Two sources: events baked into analysis.json (from the config `events.toml`,
+  // shared by everyone who opens the report) and events you add in this browser
+  // (saved to localStorage, private to you). Both are annotation only — they
+  // never touch any computed number.
+  var EVENTS_KEY = "wdmg.events.v1";
+  function isIsoDate(s){ return /^\d{4}-\d{2}-\d{2}$/.test(s || ""); }
+  function cfgEvents(){
+    return (Array.isArray(A.events) ? A.events : []).map(function(e){
+      return { date:e.date, label:e.label, note:e.note || "", source:"config" }; });
+  }
+  function userEvents(){
+    try {
+      var raw = window.localStorage.getItem(EVENTS_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return (Array.isArray(arr) ? arr : []).map(function(e){
+        return { date:e.date, label:e.label, note:e.note || "", source:"user" }; });
+    } catch(e){ return []; }
+  }
+  function saveUserEvents(list){
+    try { window.localStorage.setItem(EVENTS_KEY, JSON.stringify(list.map(function(e){
+      return { date:e.date, label:e.label, note:e.note || "" }; }))); return true; }
+    catch(e){ return false; }
+  }
+  // Config + user events, validated and sorted by date (stable, ascending).
+  function allEvents(){
+    var all = cfgEvents().concat(userEvents()).filter(function(e){
+      return e && isIsoDate(e.date) && e.label && String(e.label).trim(); });
+    all.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    return all;
+  }
 
   // ---------- helpers ----------
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
@@ -349,13 +412,18 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     {key:"kinds",         label:"Kind"}
   ];
 
-  function freshNeg(){ return {persons:false, accounts:false, categories:false, subcategories:false, kinds:false}; }
+  // Each facet holds TWO sets: `inc` (keep only these) and `exc` (drop these).
+  // They combine freely, so within one facet you can include some values AND
+  // exclude others at the same time (e.g. keep {Groceries, Restaurants} but drop
+  // a specific subcategory), and the same across different facets.
+  function freshFacet(){ return {inc:new Set(), exc:new Set()}; }
   var state = {
-    persons:new Set(), accounts:new Set(), categories:new Set(), subcategories:new Set(),
-    kinds:new Set(), monthFrom:null, monthTo:null, search:"", searchExclude:"", amtMin:null, amtMax:null,
-    // Per-facet negation: when neg[key] is true, the selected values are EXCLUDED
-    // rather than required (e.g. "Kind ≠ income", "Category ≠ Transfers").
-    neg: freshNeg()
+    persons:freshFacet(), accounts:freshFacet(), categories:freshFacet(),
+    subcategories:freshFacet(), kinds:freshFacet(),
+    monthFrom:null, monthTo:null, search:"", searchExclude:"", amtMin:null, amtMax:null,
+    // Range negation: when true, the date / amount range is EXCLUDED instead of kept
+    // (e.g. drop everything in Dec 2025, or drop every charge between $0 and $20).
+    negMonths:false, negAmt:false
   };
   // Merchant search/exclude are regexes (case-insensitive). Compiled once per
   // rerender; null when empty or invalid (then we fall back to substring match).
@@ -365,11 +433,15 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     if(state.search){ try { SEARCH_RE = new RegExp(state.search, "i"); } catch(e){ SEARCH_BAD = true; } }
     if(state.searchExclude){ try { EXCL_RE = new RegExp(state.searchExclude, "i"); } catch(e){ EXCL_BAD = true; } }
   }
-  // A facet passes if no selection, or (selection contains the value) XOR negated.
+  // A value passes a facet when it is not excluded and (no includes are set, or it
+  // is one of the included values). Includes and excludes apply together.
   function facetPass(key, val){
-    var sel = state[key]; if(!sel.size) return true;
-    return state.neg[key] ? !sel.has(val) : sel.has(val);
+    var f = state[key];
+    if(f.exc.has(val)) return false;
+    if(f.inc.size && !f.inc.has(val)) return false;
+    return true;
   }
+  function facetActive(key){ var f = state[key]; return f.inc.size > 0 || f.exc.size > 0; }
 
   function passes(t){
     if(!facetPass("persons", t.person))           return false;
@@ -377,12 +449,18 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     if(!facetPass("categories", t.category))      return false;
     if(!facetPass("subcategories", t.subcategory))return false;
     if(!facetPass("kinds", t.kind))               return false;
-    if(state.monthFrom && t.month < state.monthFrom)                       return false;
-    if(state.monthTo   && t.month > state.monthTo)                         return false;
+    // Date range: keep rows inside [from,to] — or, when negated, EXCLUDE that span.
+    if(state.monthFrom || state.monthTo){
+      var inMonths = (!state.monthFrom || t.month >= state.monthFrom) &&
+                     (!state.monthTo   || t.month <= state.monthTo);
+      if(state.negMonths ? inMonths : !inMonths) return false;
+    }
+    // Amount magnitude range: same keep/exclude treatment as the date range.
     if(state.amtMin != null || state.amtMax != null){
       var mag = Math.abs(toCents(t.amount));
-      if(state.amtMin != null && mag < state.amtMin) return false;
-      if(state.amtMax != null && mag > state.amtMax) return false;
+      var inAmt = (state.amtMin == null || mag >= state.amtMin) &&
+                  (state.amtMax == null || mag <= state.amtMax);
+      if(state.negAmt ? inAmt : !inAmt) return false;
     }
     if(state.search){
       if(SEARCH_RE){ if(!SEARCH_RE.test(t.merchant)) return false; }
@@ -395,8 +473,8 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     return true;
   }
   function anyFilterActive(){
-    return state.persons.size || state.accounts.size || state.categories.size ||
-      state.subcategories.size || state.kinds.size || state.monthFrom || state.monthTo ||
+    return facetActive("persons") || facetActive("accounts") || facetActive("categories") ||
+      facetActive("subcategories") || facetActive("kinds") || state.monthFrom || state.monthTo ||
       state.search || state.searchExclude || state.amtMin != null || state.amtMax != null;
   }
 
@@ -566,6 +644,35 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
           amount:months[mo], baseline:fence, severity:(months[mo]/fence).toFixed(2), merchant:null});
       });
     });
+    // (c) rare-subcategory large purchases: a big one-off in a subcategory too
+    // small for the MAD pass (< 4 txns) has no peers to be an outlier against — yet
+    // a $3,000 charge in a subcategory you almost never use is exactly the unusual
+    // activity worth surfacing. Flag it when its magnitude is a strong UPPER outlier
+    // of the GLOBAL non-recurring spend distribution, in log space (purchase sizes
+    // are heavily right-skewed). Upper tail only; mirrors the Rust `rare_large`.
+    var subCount = {}, logs = [];
+    rows.forEach(function(t){ if(t.kind !== "spend") return;
+      if(recurringMerchants[t.merchant]) return;
+      var key = t.subcategory || "Uncategorized";
+      subCount[key] = (subCount[key] || 0) + 1;
+      var c = Math.abs(toCents(t.amount)); if(c > 0) logs.push(Math.log(c)); });
+    if(logs.length >= 10){
+      var lmed = median(logs);
+      var lmad = median(logs.map(function(x){ return Math.abs(x - lmed); }));
+      var lden = 1.4826 * lmad;
+      if(lden > 0){
+        var typical = Math.round(Math.exp(lmed)); // global typical magnitude, cents
+        rows.forEach(function(t){ if(t.kind !== "spend") return;
+          if(recurringMerchants[t.merchant]) return;
+          var key = t.subcategory || "Uncategorized";
+          if((subCount[key] || 0) >= 4) return; // big enough -> MAD pass owns it
+          var c = Math.abs(toCents(t.amount)); if(c <= 0) return;
+          var z = (Math.log(c) - lmed) / lden;
+          if(z > 3.0) out.push({method:"rare_large", category:key, period_or_date:t.date,
+            amount:c, baseline:typical, severity:z.toFixed(2), merchant:t.merchant});
+        });
+      }
+    }
     out.sort(function(a,b){
       return (a.method < b.method ? -1 : a.method > b.method ? 1 :
         a.category < b.category ? -1 : a.category > b.category ? 1 :
@@ -574,35 +681,60 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     return out;
   }
 
-  function lsSlope(ys){
-    var n = ys.length; if(n < 2) return null;
-    var sx=0, sy=0, sxx=0, sxy=0;
-    for(var i=0;i<n;i++){ sx+=i; sy+=ys[i]; sxx+=i*i; sxy+=i*ys[i]; }
-    var denom = n*sxx - sx*sx; if(denom === 0) return null;
-    return (n*sxy - sx*sy) / denom;
+  // The most recent COMPLETE month in `rows`. A trailing month is "partial" when
+  // the latest transaction date isn't that month's last day (e.g. the current
+  // month so far) — including it makes MoM/YoY look like a crash, so trends drop
+  // it. Returns {month, partial, raw} or null.
+  function lastCompleteMonth(rows){
+    var maxIso = null;
+    rows.forEach(function(t){ if(t.date && (maxIso === null || t.date > maxIso)) maxIso = t.date; });
+    if(!maxIso) return null;
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(maxIso); if(!m) return null;
+    var y = +m[1], mo = +m[2], day = +m[3];
+    var lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate(); // day 0 of next month
+    var raw = m[1] + "-" + m[2];
+    if(day >= lastDay) return { month: raw, partial: false, raw: raw };
+    var py = mo > 1 ? y : y - 1, pm = mo > 1 ? mo - 1 : 12;
+    return { month: py + "-" + ("0" + pm).slice(-2), partial: true, raw: raw };
   }
-  function detectTrends(rows){
-    var byCat = {};
-    rows.forEach(function(t){ if(t.kind !== "spend") return;
-      var cm = byCat[t.category] || (byCat[t.category] = {});
+  // Trend rows for one kind ("spend"/"income"), grouped by `field` ("category"
+  // for spend, "subcategory"/source for income). Months after `cutoff` (the last
+  // complete month) are dropped. Each row carries the latest complete month's
+  // total plus its month-over-month and year-over-year deltas; the renderer puts
+  // a coloured arrow on each delta, so the direction IS the number (no separate
+  // slope word that could contradict it). Percentages are suppressed when the
+  // baseline is under $1, where a ratio explodes into meaningless thousands of %.
+  function detectTrends(rows, kind, field, cutoff){
+    var PCT_FLOOR = 100; // cents
+    var byKey = {};
+    rows.forEach(function(t){ if(t.kind !== kind) return;
+      if(cutoff && t.month > cutoff) return; // drop the partial trailing month
+      var key = t[field] || t.category || "—";
+      var cm = byKey[key] || (byKey[key] = {});
       cm[t.month] = (cm[t.month] || 0) + Math.abs(toCents(t.amount)); });
     var out = [];
-    Object.keys(byCat).forEach(function(cat){
-      var months = byCat[cat], keys = Object.keys(months).sort();
+    Object.keys(byKey).forEach(function(key){
+      var months = byKey[key], keys = Object.keys(months).sort();
       if(!keys.length) return;
       var lastKey = keys[keys.length-1], lastTot = months[lastKey];
       var momAbs=null, momPct=null;
       if(keys.length >= 2){ var prev = months[keys[keys.length-2]];
-        momAbs = lastTot - prev; momPct = prev === 0 ? null : (momAbs/prev*100).toFixed(2); }
+        momAbs = lastTot - prev;
+        momPct = Math.abs(prev) < PCT_FLOOR ? null : (momAbs/prev*100).toFixed(1); }
       var yoyAbs=null, yoyPct=null;
       var ym = /^(\d{4})-(\d{2})/.exec(lastKey);
       if(ym){ var pk = (+ym[1]-1) + "-" + ym[2];
-        if(months[pk] != null){ yoyAbs = lastTot - months[pk]; yoyPct = months[pk]===0?null:(yoyAbs/months[pk]*100).toFixed(2); } }
-      var slope = lsSlope(keys.map(function(k){ return months[k]/100; })); // dollars, eps=1.0
-      var dir = slope == null ? "flat" : slope > 1 ? "rising" : slope < -1 ? "falling" : "flat";
-      out.push({category:cat, mom_abs:momAbs, mom_pct:momPct, yoy_abs:yoyAbs, yoy_pct:yoyPct, direction:dir});
+        if(months[pk] != null){ yoyAbs = lastTot - months[pk];
+          yoyPct = Math.abs(months[pk]) < PCT_FLOOR ? null : (yoyAbs/months[pk]*100).toFixed(1); } }
+      out.push({label:key, last:lastTot, last_month:lastKey,
+        mom_abs:momAbs, mom_pct:momPct, yoy_abs:yoyAbs, yoy_pct:yoyPct});
     });
-    out.sort(function(a,b){ return a.category < b.category ? -1 : a.category > b.category ? 1 : 0; });
+    // Biggest mover first (by |MoM Δ|), rows without a MoM last, then by label.
+    out.sort(function(a,b){
+      var am = a.mom_abs == null ? -1 : Math.abs(a.mom_abs);
+      var bm = b.mom_abs == null ? -1 : Math.abs(b.mom_abs);
+      if(am !== bm) return bm - am;
+      return a.label < b.label ? -1 : a.label > b.label ? 1 : 0; });
     return out;
   }
 
@@ -746,6 +878,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       '</tbody></table>';
   }
 
+  var METHOD_LABEL = { mad_zscore:"unusual amount", monthly_iqr:"expensive month", rare_large:"rare big purchase" };
   function renderAnomalies(rows){
     var el = document.getElementById("anomalies-panel");
     var a = detectAnomalies(rows);
@@ -755,21 +888,48 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
         var sev = sevNum >= 5 ? "sev-high" : sevNum >= 2 ? "sev-medium" : "sev-low";
         return '<tr><td>'+esc(x.period_or_date)+(x.merchant?' · <span class="muted">'+esc(x.merchant)+'</span>':"")+
         '</td><td>'+esc(x.category)+'</td><td class="num">'+fmtMoney(x.amount)+'</td><td class="num muted">'+fmtMoney(x.baseline)+
-        '</td><td class="'+sev+'">'+esc(x.severity)+'</td><td><span class="tag">'+esc(x.method)+'</span></td></tr>'; }).join("")+
+        '</td><td class="'+sev+'">'+esc(x.severity)+'</td><td><span class="tag">'+esc(METHOD_LABEL[x.method]||x.method)+'</span></td></tr>'; }).join("")+
       '</tbody></table>';
   }
 
-  function renderTrends(rows){
-    var el = document.getElementById("trends-panel");
-    var t = detectTrends(rows);
+  function renderTrendTable(panelId, rows, kind, field, colHeader, risingIsGood, cut){
+    var el = document.getElementById(panelId); if(!el) return;
+    var t = detectTrends(rows, kind, field, cut ? cut.month : null);
     if(!t.length){ el.innerHTML = '<div class="empty">Not enough history for trends in the current selection.</div>'; return; }
-    function cell(v){ return v == null ? "—" : fmtMoney(v); }
-    function pct(v){ return v == null ? "—" : v + "%"; }
-    el.innerHTML = '<table><thead><tr><th>Category</th><th>Direction</th><th class="num">MoM Δ</th><th class="num">MoM %</th><th class="num">YoY Δ</th><th class="num">YoY %</th></tr></thead><tbody>'+
-      t.map(function(x){ return '<tr><td>'+esc(x.category)+'</td><td>'+esc(x.direction)+
-        '</td><td class="num">'+cell(x.mom_abs)+'</td><td class="num">'+pct(x.mom_pct)+
-        '</td><td class="num">'+cell(x.yoy_abs)+'</td><td class="num">'+pct(x.yoy_pct)+'</td></tr>'; }).join("")+
-      '</tbody></table>';
+    // A delta is "good" when it moves the right way for this kind: spending down
+    // (negative) or income up (positive). Colour + arrow live on the number, so
+    // the direction is never separate from — or in conflict with — the value.
+    function goodCls(num){
+      if(num == null) return "";
+      if(num === 0) return "muted";
+      return (risingIsGood ? num > 0 : num < 0) ? "pos" : "neg";
+    }
+    function arrow(num){ return num > 0 ? "↑ " : num < 0 ? "↓ " : "→ "; }
+    function deltaCell(v){
+      if(v == null) return '<td class="num">—</td>';
+      return '<td class="num ' + goodCls(v) + '">' + arrow(v) + fmtMoney(Math.abs(v)) + '</td>';
+    }
+    function pctCell(v){
+      if(v == null) return '<td class="num">—</td>';
+      var n = parseFloat(v);
+      return '<td class="num ' + goodCls(n) + '">' + arrow(n) + Math.abs(n).toFixed(1) + '%</td>';
+    }
+    var rowsHtml = t.map(function(x){
+      return '<tr><td>'+esc(x.label)+'</td>'+
+        deltaCell(x.mom_abs)+pctCell(x.mom_pct)+deltaCell(x.yoy_abs)+pctCell(x.yoy_pct)+'</tr>'; }).join("");
+    var note = 'MoM = latest full month vs the month before · YoY = vs the same month a year earlier.' +
+      (cut && cut.partial ? ' The current partial month (' + esc(cut.raw) + ') is excluded so it doesn\'t look like a crash.' : '');
+    el.innerHTML = '<table><thead><tr><th>'+esc(colHeader)+
+      '</th><th class="num">MoM Δ</th><th class="num">MoM %</th><th class="num">YoY Δ</th><th class="num">YoY %</th></tr></thead><tbody>'+
+      rowsHtml + '</tbody></table>' +
+      '<div class="muted" style="font-size:12px;margin-top:6px;">'+note+'</div>';
+  }
+  function renderTrends(rows){
+    var cut = lastCompleteMonth(rows);
+    // Spending (out) by category; income (in) by source/subcategory. For spending
+    // a fall is good (green); for income a rise is good (green).
+    renderTrendTable("trends-out-panel", rows, "spend",  "category",    "Category", false, cut);
+    renderTrendTable("trends-in-panel",  rows, "income", "subcategory", "Source",   true,  cut);
   }
 
   function renderTransfers(rows){
@@ -1064,9 +1224,42 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       // document-level mouseup (below) so it still applies if the pointer left
       // the chart's bounds before release. (u.over dies with each instance, so
       // this listener is auto-cleaned on redraw — no leak.)
-      hooks: { ready: [function(u){
-        u.over.addEventListener("mousedown", function(){ chartDragging = true; });
-      }] },
+      hooks: {
+        ready: [function(u){
+          u.over.addEventListener("mousedown", function(){ chartDragging = true; });
+        }],
+        // Draw life events as labelled vertical markers over the plotted area.
+        // Runs in device pixels (uPlot's canvas is dpr-scaled), so sizes are *dpr.
+        draw: [function(u){
+          var evs = allEvents(); if(!evs.length) return;
+          var ctx = u.ctx, dpr = u.pxRatio || window.devicePixelRatio || 1;
+          var top = u.bbox.top, bot = u.bbox.top + u.bbox.height;
+          var xmin = u.scales.x.min, xmax = u.scales.x.max;
+          ctx.save();
+          ctx.font = Math.round(11 * dpr) + "px system-ui, -apple-system, sans-serif";
+          ctx.textBaseline = "alphabetic";
+          evs.forEach(function(e){
+            var ms = dateMs(e.date); if(ms == null) return;
+            var ts = ms / 1000; if(ts < xmin || ts > xmax) return;
+            var x = Math.round(u.valToPos(ts, "x", true));
+            var col = e.source === "user" ? "#8a63d2" : "#c98a2c"; // purple = yours, amber = shared
+            ctx.strokeStyle = col; ctx.fillStyle = col;
+            ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
+            ctx.beginPath(); ctx.moveTo(x + 0.5, top); ctx.lineTo(x + 0.5, bot); ctx.stroke();
+            // Small flag triangle at the top of the line.
+            ctx.setLineDash([]);
+            ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x + 7 * dpr, top); ctx.lineTo(x, top + 7 * dpr); ctx.closePath(); ctx.fill();
+            // Label climbs upward just left of the line (rotated -90°), clipped to height.
+            var label = e.label.length > 28 ? e.label.slice(0, 27) + "…" : e.label;
+            ctx.save();
+            ctx.translate(x - 3 * dpr, bot - 4 * dpr); ctx.rotate(-Math.PI / 2);
+            ctx.textAlign = "left";
+            ctx.fillText(label, 0, 0);
+            ctx.restore();
+          });
+          ctx.restore();
+        }]
+      },
       series: [ {},
         { label: "In",  stroke: "#10915a", width: 2 },
         { label: "Out", stroke: "#c2384b", width: 2 },
@@ -1101,9 +1294,11 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 
   // ---------- filter UI ----------
   function facetBtnLabel(def){
-    var sel = state[def.key];
-    var op = (sel.size && state.neg[def.key]) ? ' <span class="cnt neg">≠</span>' : '';
-    return def.label + op + (sel.size ? ' <span class="cnt">(' + sel.size + ')</span>' : ' <span class="cnt muted">· all</span>');
+    var f = state[def.key]; var parts = [];
+    if(f.inc.size) parts.push('<span class="cnt pos">' + f.inc.size + ' ✓</span>');
+    if(f.exc.size) parts.push('<span class="cnt neg">' + f.exc.size + ' ≠</span>');
+    return def.label + ' ' + (parts.length ? '<span class="cnt">(</span>' + parts.join('<span class="cnt"> · </span>') + '<span class="cnt">)</span>'
+                                            : '<span class="cnt muted">· all</span>');
   }
   function buildFilterBar(){
     var bar = document.getElementById("filterbar");
@@ -1117,34 +1312,34 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       var btn = document.createElement("button"); btn.type = "button"; btn.className = "btn facet-btn";
       btn.innerHTML = facetBtnLabel(def);
       var menu = document.createElement("div"); menu.className = "facet-menu";
-      var mini = document.createElement("div"); mini.className = "mini";
-      var all = document.createElement("a"); all.textContent = "all"; var none = document.createElement("a"); none.textContent = "none";
-      mini.appendChild(all); mini.appendChild(none); menu.appendChild(mini);
-      // Negate toggle: treat the selection as an EXCLUDE list instead of include.
-      var negRow = document.createElement("label");
-      negRow.style.cssText = "display:flex;gap:6px;align-items:center;font-size:12px;border-top:1px solid var(--line);margin-top:4px;padding-top:6px;";
-      var ncb = document.createElement("input"); ncb.type = "checkbox"; ncb.checked = !!state.neg[def.key];
-      ncb.addEventListener("change", function(){
-        state.neg[def.key] = ncb.checked; btn.innerHTML = facetBtnLabel(def); rerender();
-      });
-      var nsp = document.createElement("span"); nsp.textContent = "exclude selected (≠)";
-      negRow.appendChild(ncb); negRow.appendChild(nsp); menu.appendChild(negRow);
+      var f = state[def.key];
+      // Header: legend for the two columns (keep ✓ / drop ≠) plus a clear shortcut.
+      var head = document.createElement("div"); head.className = "facet-head";
+      head.innerHTML = '<span class="col-h"><span class="pos">✓</span> keep · <span class="neg">≠</span> drop</span>';
+      var clear = document.createElement("a"); clear.textContent = "clear"; clear.className = "facet-clear";
+      head.appendChild(clear); menu.appendChild(head);
+
+      var rows = [];
       values.forEach(function(v){
-        var l = document.createElement("label");
-        var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = v;
-        cb.checked = state[def.key].has(v);
-        cb.addEventListener("change", function(){
-          if(cb.checked) state[def.key].add(v); else state[def.key].delete(v);
+        var l = document.createElement("label"); l.className = "facet-row";
+        var inc = document.createElement("input"); inc.type = "checkbox"; inc.className = "f-inc"; inc.title = "keep only this";
+        var exc = document.createElement("input"); exc.type = "checkbox"; exc.className = "f-exc"; exc.title = "exclude this";
+        inc.checked = f.inc.has(v); exc.checked = f.exc.has(v);
+        // Include and exclude are mutually exclusive per value; ticking one clears the other.
+        inc.addEventListener("change", function(){
+          if(inc.checked){ f.inc.add(v); f.exc.delete(v); exc.checked = false; } else { f.inc.delete(v); }
           btn.innerHTML = facetBtnLabel(def); rerender();
         });
-        var sp = document.createElement("span"); sp.textContent = v;
-        l.appendChild(cb); l.appendChild(sp); menu.appendChild(l);
+        exc.addEventListener("change", function(){
+          if(exc.checked){ f.exc.add(v); f.inc.delete(v); inc.checked = false; } else { f.exc.delete(v); }
+          btn.innerHTML = facetBtnLabel(def); rerender();
+        });
+        var sp = document.createElement("span"); sp.className = "facet-val"; sp.textContent = v;
+        l.appendChild(inc); l.appendChild(exc); l.appendChild(sp); menu.appendChild(l);
+        rows.push([inc, exc]);
       });
-      all.addEventListener("click", function(){ state[def.key] = new Set(); // all = no constraint
-        menu.querySelectorAll("input").forEach(function(cb){ cb.checked = false; });
-        btn.innerHTML = facetBtnLabel(def); rerender(); });
-      none.addEventListener("click", function(){ state[def.key] = new Set(["\u241Fnone\u241F"]); // impossible value
-        menu.querySelectorAll("input").forEach(function(cb){ cb.checked = false; });
+      clear.addEventListener("click", function(){ f.inc.clear(); f.exc.clear();
+        rows.forEach(function(r){ r[0].checked = false; r[1].checked = false; });
         btn.innerHTML = facetBtnLabel(def); rerender(); });
       btn.addEventListener("click", function(ev){ ev.stopPropagation();
         var open = wrap.classList.contains("open");
@@ -1167,8 +1362,22 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       });
       l.appendChild(s); return l;
     }
+    // Inline "≠" toggle that flips a range from keep-only to exclude.
+    function negToggle(getter, setter, title){
+      var l = document.createElement("label");
+      l.style.cssText = "display:inline-flex;gap:3px;align-items:center;font-size:12px;color:var(--muted);cursor:pointer;";
+      l.title = title;
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!getter();
+      cb.addEventListener("change", function(){ setter(cb.checked); rerender(); });
+      var sp = document.createElement("span"); sp.textContent = "≠";
+      l.appendChild(cb); l.appendChild(sp); return l;
+    }
+
     bar.appendChild(monthSelect("month-from", "From"));
     bar.appendChild(monthSelect("month-to", "To"));
+    bar.appendChild(negToggle(function(){ return state.negMonths; },
+      function(v){ state.negMonths = v; },
+      "Exclude this date range instead of keeping only it"));
 
     // Amount range (compares the transaction's magnitude, in dollars).
     function amtInput(id, ph, centsVal){
@@ -1189,6 +1398,9 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     bar.appendChild(amtLabel);
     bar.appendChild(amtInput("amt-min", "min", state.amtMin));
     bar.appendChild(amtInput("amt-max", "max", state.amtMax));
+    bar.appendChild(negToggle(function(){ return state.negAmt; },
+      function(v){ state.negAmt = v; },
+      "Exclude amounts in this range instead of keeping only them"));
 
     var search = document.createElement("input"); search.type = "text"; search.id = "search";
     search.placeholder = "merchant regex…"; search.value = state.search; search.title = "Case-insensitive regular expression matched against the merchant";
@@ -1219,10 +1431,11 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 
     var reset = document.createElement("button"); reset.type = "button"; reset.className = "btn"; reset.textContent = "Reset";
     reset.addEventListener("click", function(){
-      state.persons = new Set(); state.accounts = new Set(); state.categories = new Set();
-      state.subcategories = new Set(); state.kinds = new Set();
+      state.persons = freshFacet(); state.accounts = freshFacet(); state.categories = freshFacet();
+      state.subcategories = freshFacet(); state.kinds = freshFacet();
       state.monthFrom = null; state.monthTo = null; state.search = ""; state.searchExclude = "";
-      state.amtMin = null; state.amtMax = null; state.neg = freshNeg();
+      state.amtMin = null; state.amtMax = null;
+      state.negMonths = false; state.negAmt = false;
       buildFilterBar(); rerender();
     });
     bar.appendChild(reset);
@@ -1235,24 +1448,26 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 
   function renderActiveBar(filteredLen){
     var el = document.getElementById("activebar"); el.innerHTML = "";
-    function pill(label, key, val){
-      var p = document.createElement("span"); p.className = "pill";
+    function pill(label, key, val, neg){
+      var p = document.createElement("span"); p.className = "pill" + (neg ? " pill-neg" : "");
       p.innerHTML = '<b>'+esc(label)+':</b> '+esc(val)+' <span class="x">×</span>';
       p.querySelector(".x").addEventListener("click", key);
       el.appendChild(p);
     }
     FACET_DEFS.forEach(function(def){
-      var sel = state[def.key]; if(!sel.size) return;
-      var vals = Array.from(sel).filter(function(v){ return v !== "\u241Fnone\u241F"; });
-      var txt = (state.neg[def.key] ? "\u2260 " : "") + (sel.has("\u241Fnone\u241F") ? "none" : vals.join(", "));
-      pill(def.label, function(){ state[def.key] = new Set(); state.neg[def.key] = false; buildFilterBar(); rerender(); }, txt);
+      var f = state[def.key];
+      // Keep (✓) and drop (≠) render as separate pills so both can show at once.
+      if(f.inc.size)
+        pill(def.label, function(){ f.inc.clear(); buildFilterBar(); rerender(); }, Array.from(f.inc).join(", "), false);
+      if(f.exc.size)
+        pill(def.label, function(){ f.exc.clear(); buildFilterBar(); rerender(); }, "≠ " + Array.from(f.exc).join(", "), true);
     });
     if(state.monthFrom || state.monthTo)
-      pill("Months", function(){ state.monthFrom = null; state.monthTo = null; buildFilterBar(); rerender(); },
-        (state.monthFrom||"…") + " → " + (state.monthTo||"…"));
+      pill("Months", function(){ state.monthFrom = null; state.monthTo = null; state.negMonths = false; buildFilterBar(); rerender(); },
+        (state.negMonths ? "≠ " : "") + (state.monthFrom||"…") + " → " + (state.monthTo||"…"), state.negMonths);
     if(state.amtMin != null || state.amtMax != null)
-      pill("Amount", function(){ state.amtMin = null; state.amtMax = null; buildFilterBar(); rerender(); },
-        "$" + (state.amtMin != null ? (state.amtMin/100) : "…") + " – $" + (state.amtMax != null ? (state.amtMax/100) : "…"));
+      pill("Amount", function(){ state.amtMin = null; state.amtMax = null; state.negAmt = false; buildFilterBar(); rerender(); },
+        (state.negAmt ? "≠ " : "") + "$" + (state.amtMin != null ? (state.amtMin/100) : "…") + " – $" + (state.amtMax != null ? (state.amtMax/100) : "…"), state.negAmt);
     if(state.search)
       pill("Merchant /re/", function(){ state.search = ""; buildFilterBar(); rerender(); },
         state.search + (SEARCH_BAD ? " (invalid — using substring)" : ""));
@@ -1261,6 +1476,72 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       note.textContent = filteredLen + " of " + TX.length + " transactions";
       el.appendChild(note);
     }
+  }
+
+  // ---------- life-events editor ----------
+  // Rendered once (independent of filters); the chart markers refresh on every
+  // drawChart() via the draw hook. Add/remove persists user events to localStorage.
+  function renderEvents(){
+    var host = document.getElementById("events-ui"); if(!host) return;
+    host.innerHTML = "";
+    var hdr = document.createElement("div"); hdr.className = "events-hdr";
+    hdr.innerHTML = '<span class="events-title">Life events</span>' +
+      '<span class="muted" style="font-size:12px;">vertical markers on the chart — see how milestones line up with your money</span>';
+    var addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn"; addBtn.textContent = "+ Add event";
+    hdr.appendChild(addBtn); host.appendChild(hdr);
+
+    var form = document.createElement("div"); form.className = "events-form"; form.style.display = "none";
+    var dIn = document.createElement("input"); dIn.type = "date"; dIn.title = "Date (YYYY-MM-DD)";
+    var lIn = document.createElement("input"); lIn.type = "text"; lIn.placeholder = "label (e.g. New job)"; lIn.maxLength = 60;
+    var nIn = document.createElement("input"); nIn.type = "text"; nIn.placeholder = "note (optional)"; nIn.maxLength = 140;
+    var save = document.createElement("button"); save.type = "button"; save.className = "btn"; save.textContent = "Add";
+    var err = document.createElement("span"); err.className = "events-err";
+    form.appendChild(dIn); form.appendChild(lIn); form.appendChild(nIn); form.appendChild(save); form.appendChild(err);
+    host.appendChild(form);
+    addBtn.addEventListener("click", function(){
+      form.style.display = form.style.display === "none" ? "flex" : "none";
+      if(form.style.display !== "none") dIn.focus();
+    });
+    function doAdd(){
+      var date = dIn.value, label = (lIn.value || "").trim();
+      if(!isIsoDate(date)){ err.textContent = "pick a date"; return; }
+      if(!label){ err.textContent = "enter a label"; return; }
+      var list = userEvents();
+      list.push({ date:date, label:label, note:(nIn.value || "").trim() });
+      if(!saveUserEvents(list)){ err.textContent = "couldn't save — browser storage is blocked"; return; }
+      lIn.value = ""; nIn.value = ""; err.textContent = "";
+      renderEvents(); drawChart();
+    }
+    save.addEventListener("click", doAdd);
+    lIn.addEventListener("keydown", function(e){ if(e.key === "Enter") doAdd(); });
+    nIn.addEventListener("keydown", function(e){ if(e.key === "Enter") doAdd(); });
+
+    var evs = allEvents();
+    if(!evs.length){
+      var none = document.createElement("div"); none.className = "muted"; none.style.fontSize = "12px"; none.style.marginTop = "6px";
+      none.textContent = "No events yet — add one above (saved in this browser), or list them in events.toml to bake them into the report.";
+      host.appendChild(none); return;
+    }
+    var list = document.createElement("div"); list.className = "events-list";
+    evs.forEach(function(e){
+      var chip = document.createElement("span"); chip.className = "event-chip " + (e.source === "user" ? "ev-user" : "ev-config");
+      chip.innerHTML = '<span class="ev-dot"></span><b>' + esc(e.date) + '</b> ' + esc(e.label) +
+        (e.note ? ' <span class="muted">— ' + esc(e.note) + '</span>' : '');
+      if(e.source === "user"){
+        var x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "remove";
+        x.addEventListener("click", function(){
+          var rest = userEvents().filter(function(u){
+            return !(u.date === e.date && u.label === e.label && (u.note || "") === (e.note || "")); });
+          saveUserEvents(rest); renderEvents(); drawChart();
+        });
+        chip.appendChild(x);
+      } else {
+        var tag = document.createElement("span"); tag.className = "ev-tag"; tag.textContent = "shared"; tag.title = "from events.toml";
+        chip.appendChild(tag);
+      }
+      list.appendChild(chip);
+    });
+    host.appendChild(list);
   }
 
   // ---------- orchestration ----------
@@ -1304,6 +1585,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 
   buildFilterBar();
   initSections();
+  renderEvents();
   rerender();
 
   var rb = document.getElementById("range-buttons");

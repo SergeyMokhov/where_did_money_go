@@ -1,0 +1,29 @@
+# where-did-money-go — significant life events (optional)
+#
+# Record dated milestones here and they appear as labelled vertical markers on
+# the "Cash flow over time" chart, so you can see how a life event lined up with
+# your income and spending. Events are annotation only — they never change any
+# computed number.
+#
+# You can also add events straight from the report UI (they're saved in your
+# browser); events listed here are baked into every regenerated report and shared
+# by anyone who opens it.
+#
+# Each event needs a `date` (YYYY-MM-DD) and a short `label`; `note` is optional.
+#
+# Examples (uncomment and edit):
+#
+# [[event]]
+# date  = "2023-01-15"
+# label = "Started new job"
+# note  = "Salary went up ~20%"
+#
+# [[event]]
+# date  = "2023-09-01"
+# label = "Bought a house"
+#
+# [[event]]
+# date  = "2024-04-01"
+# label = "Car repair splurge"
+
+schema_version = 1

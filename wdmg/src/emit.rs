@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analytics::{Analytics, Categorized};
 use crate::categorize::EffectiveKind;
+use crate::config::LifeEvent;
 use crate::dedup::DedupReport;
 use crate::error::AnalyticsError;
 use crate::model::Money;
@@ -34,6 +35,10 @@ pub struct Analysis {
     pub transfers: Reconciliation,
     /// Provenance: cross-file dedup summary.
     pub dedup_report: DedupReport,
+    /// Significant life events to overlay on the cash-flow chart (annotation
+    /// only). Defaults to empty when reading an older `analysis.json`.
+    #[serde(default)]
+    pub events: Vec<LifeEvent>,
 }
 
 /// One unknown-merchant entry for the review queue.
@@ -87,11 +92,13 @@ pub fn build_analysis(
     analytics: Analytics,
     transfers: Reconciliation,
     dedup_report: DedupReport,
+    events: Vec<LifeEvent>,
 ) -> Analysis {
     Analysis {
         analytics,
         transfers,
         dedup_report,
+        events,
     }
 }
 
