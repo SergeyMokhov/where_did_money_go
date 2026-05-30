@@ -19,6 +19,21 @@ end   = "2999-07-01"
 label = "Bender's IRONWORKS factory job"
 note  = "Second salary — IRONWORKS payroll stops July 2999"
 
+# Two OVERLAPPING money-leak periods (easter eggs) — each is a steady monthly
+# subscription you can also find in "Recurring & subscriptions". Their bands stack
+# (darker amber) where they overlap, through 2998.
+[[event]]
+date  = "2997-09-06"
+end   = "2998-12-06"
+label = "Fry's gym he forgot to cancel"
+note  = "JOG-O-TRON GYM $44.99/mo — 16 months; he went twice"
+
+[[event]]
+date  = "2998-05-06"
+end   = "2999-09-06"
+label = "Bender's booze-of-the-month club"
+note  = "LOBRAU PLATINUM CLUB $89.99/mo on the card he never pays off"
+
 [[event]]
 date  = "2998-08-12"
 label = "Mars Vegas getaway"

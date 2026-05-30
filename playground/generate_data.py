@@ -247,6 +247,22 @@ bn_row("LUNAR VEGAS CASINO", -8000.00, dt.date(2999, 9, 17), "DEBIT", "rock bott
 for yy in (2997, 2998, 2999):
     sv_row("INTEREST PAID", u(2, 20), dt.date(yy, 12, 31), "CREDIT")
 
+# === Easter egg: two OVERLAPPING life-event periods (see config/events.toml) ===
+# Appended AFTER the seeded loop with fixed amounts and fixed times so they don't
+# consume the RNG stream above — every other number stays byte-identical. Each is
+# a steady monthly charge over a date range, so it surfaces as a recurring
+# subscription AND draws as a shaded band on the cash-flow chart. The two ranges
+# overlap through 2998, where the bands stack (darker) — the overlap demo.
+#   A) Fry's gym he forgot to cancel — JOG-O-TRON GYM $44.99/mo, Sep 2997 → Dec 2998.
+for y, m in month_iter(2997, 9, 2998, 12):
+    mc.append(["JOG-O-TRON GYM", "PURCHASE", "FRY",
+               dt.date(y, m, 6).strftime("%m/%d/%Y"), "08:05 AM", amt(-44.99)])
+#   B) Bender's booze-of-the-month club on the card he never pays off —
+#      LOBRAU PLATINUM CLUB $89.99/mo, May 2998 → Sep 2999 (overlaps A through 2998).
+for y, m in month_iter(2998, 5, 2999, 9):
+    bmc.append(["LOBRAU PLATINUM CLUB", "PURCHASE", "BENDER",
+                dt.date(y, m, 6).strftime("%m/%d/%Y"), "08:05 PM", amt(-89.99)])
+
 
 # === Writers =================================================================
 def write_csv(path, header, rows, quote_all=False):

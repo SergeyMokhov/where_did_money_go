@@ -84,6 +84,16 @@ over three years.
 - **Two splurges.** A **$5,500** MARS VEGAS RESORT trip (Aug 2998) and a **$3,000**
   WONG INDUSTRIES JEWELLERS gift for Leela (Valentine's, 2999) show up under
   **Unusual activity**.
+- **Two overlapping "money-leak" subscriptions.** Both are steady monthly charges
+  you'll spot in **Recurring & subscriptions** *and* as shaded **period bands** on
+  the cash-flow chart:
+  - **Fry's gym he forgot to cancel** — `JOG-O-TRON GYM`, **$44.99/mo**, Sep 2997
+    → Dec 2998 (16 months, ~$720 down the drain; he went twice).
+  - **Bender's booze-of-the-month club** — `LOBRAU PLATINUM CLUB`, **$89.99/mo**,
+    May 2998 → Sep 2999, billed to the Mastercard he never pays off.
+
+  Their bands **overlap through 2998**, where the amber shading stacks darker —
+  that's the period-overlap demo. (Both also overlap Bender's IRONWORKS band.)
 - **Nibbler the pet.** Leela spends on INTERSPECIES VET visits and NIBBLONIAN CHOW
   — see *Pets → Pet Supplies & Vet* under **Person = leela**.
 - **Cross-file dedup.** `joint_chequing_recent.csv` overlaps the last two months of
@@ -104,11 +114,13 @@ over three years.
   to coincide here — on real data Public adds the round-number-to-individual flags.)
 - **Life-event markers (points *and* periods).** `config/events.toml` plants amber
   overlays on the cash-flow chart: three **points** (crew hired, Mars Vegas getaway,
-  Fry's inheritance) and one **period** — a shaded band for *Bender's IRONWORKS
-  factory job* (2997 → Jul 2999). Watch how the band's right edge lands right where
-  his income drops and the gambling peaks. Add your own (purple) markers — a single
-  date, or a date range for a period — from the report's **Life events** control
-  under the chart; they save in your browser.
+  Fry's inheritance) and three **periods** drawn as shaded bands — *Bender's
+  IRONWORKS factory job* (2997 → Jul 2999, its right edge landing right where his
+  income drops and gambling peaks), plus the two overlapping money-leak
+  subscriptions above (*Fry's gym* and *Bender's booze club*), whose bands stack
+  darker through 2998. Add your own (purple) markers — a single date, or a date
+  range for a period — from the report's **Life events** control under the chart;
+  they save in your browser.
 
 ---
 
