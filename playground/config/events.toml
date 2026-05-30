@@ -1,27 +1,15 @@
 # Significant life events for the Futurama playground household.
-# These render as amber overlays on the "Cash flow over time" chart — points as
-# vertical markers, ranges (with an `end`) as shaded bands — so you can see how
-# each milestone lined up with the money. (You can also add your own from the
-# report UI — those show up in purple and are saved in your browser.)
+# These render as overlays on the "Cash flow over time" chart — points as vertical
+# markers, ranges (with an `end`) as shaded bands, each in its own colour — so you
+# can see how a milestone lined up with the money. (You can also add your own from
+# the report UI; they're saved in your browser. Click any event to hide/show it.)
+#
+# Two OVERLAPPING money-leak periods (easter eggs) — each is a steady monthly
+# subscription you can also find in "Recurring & subscriptions". Their bands
+# overlap through 2998, where the shading stacks.
 
 schema_version = 1
 
-[[event]]
-date  = "2997-01-01"
-label = "Crew starts at Planet Express"
-note  = "Farnsworth payroll begins"
-
-# A *period* (date..end → shaded band): Bender's second income, bending girders at
-# IRONWORKS. The band ends right where his income drops and the gambling peaks.
-[[event]]
-date  = "2997-01-03"
-end   = "2999-07-01"
-label = "Bender's IRONWORKS factory job"
-note  = "Second salary — IRONWORKS payroll stops July 2999"
-
-# Two OVERLAPPING money-leak periods (easter eggs) — each is a steady monthly
-# subscription you can also find in "Recurring & subscriptions". Their bands stack
-# (darker amber) where they overlap, through 2998.
 [[event]]
 date  = "2997-09-06"
 end   = "2998-12-06"
@@ -33,13 +21,3 @@ date  = "2998-05-06"
 end   = "2999-09-06"
 label = "Bender's booze-of-the-month club"
 note  = "LOBRAU PLATINUM CLUB $89.99/mo on the card he never pays off"
-
-[[event]]
-date  = "2998-08-12"
-label = "Mars Vegas getaway"
-note  = "$5,500 resort splurge"
-
-[[event]]
-date  = "2999-06-10"
-label = "Fry's inheritance"
-note  = "$50,000 from the Estate of Yancy Fry Sr"

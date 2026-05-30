@@ -92,8 +92,10 @@ over three years.
   - **Bender's booze-of-the-month club** — `LOBRAU PLATINUM CLUB`, **$89.99/mo**,
     May 2998 → Sep 2999, billed to the Mastercard he never pays off.
 
-  Their bands **overlap through 2998**, where the amber shading stacks darker —
-  that's the period-overlap demo. (Both also overlap Bender's IRONWORKS band.)
+  These are the **only two life events marked** on the chart, and their bands
+  **overlap through 2998**, where the shading stacks darker — the period-overlap
+  demo. Each is a different colour; click either chip under the chart to hide/show
+  it.
 - **Nibbler the pet.** Leela spends on INTERSPECIES VET visits and NIBBLONIAN CHOW
   — see *Pets → Pet Supplies & Vet* under **Person = leela**.
 - **Cross-file dedup.** `joint_chequing_recent.csv` overlaps the last two months of
@@ -112,15 +114,12 @@ over three years.
   amounts aren't natural) — Business+. (This synthetic data has no near-threshold
   *structuring* or irregular *round-number* clusters, so Business and Public happen
   to coincide here — on real data Public adds the round-number-to-individual flags.)
-- **Life-event markers (points *and* periods).** `config/events.toml` plants amber
-  overlays on the cash-flow chart: three **points** (crew hired, Mars Vegas getaway,
-  Fry's inheritance) and three **periods** drawn as shaded bands — *Bender's
-  IRONWORKS factory job* (2997 → Jul 2999, its right edge landing right where his
-  income drops and gambling peaks), plus the two overlapping money-leak
-  subscriptions above (*Fry's gym* and *Bender's booze club*), whose bands stack
-  darker through 2998. Add your own (purple) markers — a single date, or a date
-  range for a period — from the report's **Life events** control under the chart;
-  they save in your browser.
+- **Life-event markers.** `config/events.toml` marks just **two** events on the
+  cash-flow chart, both shaded **period bands** in their own colours: *Fry's gym*
+  and *Bender's booze club* (see above), which overlap through 2998. Add your own
+  markers — a single date, or a date range for a period — from the **Life events**
+  control under the chart (saved in your browser); each gets its own colour, and
+  clicking any event hides/shows it on the chart.
 
 ---
 
