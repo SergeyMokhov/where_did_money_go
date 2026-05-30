@@ -163,6 +163,12 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 .event-chip .x{cursor:pointer;font-weight:700;opacity:.7;margin-left:2px;} .event-chip .x:hover{opacity:1;color:var(--neg);}
 .event-chip .ev-tag{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
   border:1px solid var(--line);border-radius:6px;padding:0 4px;}
+.anomtag-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);
+  margin:6px 0;cursor:pointer;user-select:none;}
+.anomtag-toggle input{cursor:pointer;margin:0;}
+.anomtag-key{display:inline-flex;align-items:center;gap:3px;}
+.anomtag-key .ak{display:inline-block;width:7px;height:7px;transform:rotate(45deg);border-radius:1px;}
+.anomtag-key .ak-h{background:#d23b4e;} .anomtag-key .ak-m{background:#d98a2c;} .anomtag-key .ak-l{background:#9aa0a6;}
 </style>
 </head>
 <body>
@@ -196,7 +202,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="cards" id="cards"></div>
 
   <!-- Cash flow over time -->
-  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. Life events are overlaid — each in its own colour — so you can see how a milestone lined up with your money: a single date shows as a vertical marker, a date range as a shaded band (e.g. a renovation or a stretch between jobs). Click an event under the chart to hide or show it. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
+  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. Life events are overlaid — each in its own colour — so you can see how a milestone lined up with your money: a single date shows as a vertical marker, a date range as a shaded band (e.g. a renovation or a stretch between jobs). Click an event under the chart to hide or show it. Unusual-activity flags are auto-tagged along the top edge (a diamond for a dated flag, a short bar for a month or streak, coloured by severity) and follow the current lens and filters; toggle them under the chart. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
   <div class="panel">
     <div class="chips" id="range-buttons" style="margin-bottom:8px;">
       <button class="btn active" data-range="all" type="button">All</button>
@@ -481,8 +487,13 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     negMonths:false, negAmt:false,
     // Persona lens for the Unusual-activity section; defaults to the configured
     // profile but is switchable live. Forensic flags show only for business/public.
-    lens: (A.analysis_profile || "consumer")
+    lens: (A.analysis_profile || "consumer"),
+    // Auto-tag the currently-visible anomalies on the cash-flow chart (default on,
+    // remembered in the browser). Set just below from localStorage.
+    showAnomTags: true
   };
+  var ANOMTAGS_KEY = "wdmg.anomtags.v1";
+  try { var _at = window.localStorage.getItem(ANOMTAGS_KEY); if(_at !== null) state.showAnomTags = _at === "1"; } catch(e){}
   // Merchant search/exclude are regexes (case-insensitive). Compiled once per
   // rerender; null when empty or invalid (then we fall back to substring match).
   var SEARCH_RE = null, SEARCH_BAD = false, EXCL_RE = null, EXCL_BAD = false;
@@ -744,6 +755,33 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   }
   function detectAnomalies(){ return ANOM.filter(anomalyPasses); }
 
+  // ----- chart auto-tags for unusual activity -----
+  // Severity → marker colour (an alert palette, distinct from the per-event hues).
+  var ANOM_TAG_COLOR = { "sev-high":"#d23b4e", "sev-medium":"#d98a2c", "sev-low":"#9aa0a6" };
+  function monthLastDayMs(y, m1){ return Date.UTC(y, m1, 0); } // m1 = 1-based month → last day
+  // Resolve an anomaly's `period_or_date` to a chart extent (ms). A single day →
+  // point; a month (YYYY-MM) or a streak (YYYY-MM…YYYY-MM) → a span. Returns null
+  // when there's no usable date (e.g. Benford's "all").
+  function anomalyExtent(a){
+    var p = (a.period_or_date || "").trim();
+    var d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(p);
+    if(d){ var t = Date.UTC(+d[1], +d[2]-1, +d[3]); return { start:t, end:t, point:true }; }
+    var r = /^(\d{4})-(\d{2})\s*(?:…|\.\.\.)\s*(\d{4})-(\d{2})$/.exec(p);
+    if(r){ return { start: Date.UTC(+r[1], +r[2]-1, 1), end: monthLastDayMs(+r[3], +r[4]), point:false }; }
+    var mo = /^(\d{4})-(\d{2})$/.exec(p);
+    if(mo){ return { start: Date.UTC(+mo[1], +mo[2]-1, 1), end: monthLastDayMs(+mo[1], +mo[2]), point:false }; }
+    return null;
+  }
+  // The currently-visible anomalies that carry a date/range, as drawable chart tags
+  // (so the chart and the Unusual-activity table always agree under lens + filters).
+  function anomalyChartTags(){
+    return detectAnomalies().map(function(a){
+      var ext = anomalyExtent(a); if(!ext) return null;
+      return { start:ext.start, end:ext.end, point:ext.point,
+        color: ANOM_TAG_COLOR[sevClass(a)] || "#9aa0a6" };
+    }).filter(Boolean);
+  }
+
   // The most recent COMPLETE month in `rows`. A trailing month is "partial" when
   // the latest transaction date isn't that month's last day (e.g. the current
   // month so far) — including it makes MoM/YoY look like a crash, so trends drop
@@ -986,7 +1024,10 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   }
   function wireLens(el){
     var sel = el.querySelector("#lens-select");
-    if(sel) sel.addEventListener("change", function(){ state.lens = sel.value; renderAnomalies(); });
+    if(sel) sel.addEventListener("change", function(){
+      state.lens = sel.value; renderAnomalies();
+      drawChart(); // the chart auto-tags follow the visible anomalies, so refresh them
+    });
   }
   function renderAnomalies(){
     var el = document.getElementById("anomalies-panel");
@@ -1350,13 +1391,16 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
         ready: [function(u){
           u.over.addEventListener("mousedown", function(){ chartDragging = true; });
         }],
-        // Draw life events over the plotted area: periods as shaded bands (first,
-        // so point lines sit on top), points as labelled vertical markers. Runs in
-        // device pixels (uPlot's canvas is dpr-scaled), so sizes are *dpr.
+        // Overlay on the plotted area: (1) life events — periods as shaded bands,
+        // points as labelled markers — and (2) auto-tags for the currently-visible
+        // unusual-activity flags along the top rail. Runs in device pixels (uPlot's
+        // canvas is dpr-scaled), so sizes are *dpr.
         draw: [function(u){
-          // Only events toggled visible; each carries its own colour (e.color) and
+          // Events toggled visible; each carries its own colour (e.color) and
           // translucent band fill (e.fill), assigned in allEvents().
-          var evs = visibleEvents(); if(!evs.length) return;
+          var evs = visibleEvents();
+          var anomTags = state.showAnomTags ? anomalyChartTags() : [];
+          if(!evs.length && !anomTags.length) return;
           var ctx = u.ctx, dpr = u.pxRatio || window.devicePixelRatio || 1;
           var top = u.bbox.top, bot = u.bbox.top + u.bbox.height;
           var left = u.bbox.left, right = u.bbox.left + u.bbox.width;
@@ -1419,6 +1463,27 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
             ctx.textAlign = "left";
             ctx.fillText(label, 0, 0);
             ctx.restore();
+          });
+          // Pass 3 — auto-tag unusual activity along the top rail: a diamond for a
+          // dated flag, a short bar for a month/streak. Coloured by severity. The
+          // detail lives in the Unusual-activity table; these are just locators.
+          ctx.setLineDash([]);
+          var railY = top + 3 * dpr;
+          anomTags.forEach(function(g){
+            var sTs = g.start / 1000, eTs = (g.end == null ? g.start : g.end) / 1000;
+            if(eTs < xmin || sTs > xmax) return;
+            ctx.fillStyle = g.color;
+            if(g.point){
+              var x = clampX(u.valToPos(sTs, "x", true)), r = 3.2 * dpr;
+              ctx.beginPath();
+              ctx.moveTo(x, railY - r); ctx.lineTo(x + r, railY); ctx.lineTo(x, railY + r); ctx.lineTo(x - r, railY);
+              ctx.closePath(); ctx.fill();
+            } else {
+              var x1 = clampX(u.valToPos(Math.max(sTs, xmin), "x", true));
+              var x2 = clampX(u.valToPos(Math.min(eTs, xmax), "x", true));
+              if(x2 < x1){ var t = x1; x1 = x2; x2 = t; }
+              ctx.fillRect(x1, railY - 2 * dpr, Math.max(2 * dpr, x2 - x1), 4 * dpr);
+            }
           });
           ctx.restore();
         }]
@@ -1652,6 +1717,20 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       '<span class="muted" style="font-size:12px;">markers (and shaded spans for periods) on the chart — see how milestones line up with your money</span>';
     var addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn"; addBtn.textContent = "+ Add event";
     hdr.appendChild(addBtn); host.appendChild(hdr);
+
+    // Toggle: auto-tag the currently-visible unusual-activity flags on the chart.
+    var tagWrap = document.createElement("label"); tagWrap.className = "anomtag-toggle";
+    var tagCb = document.createElement("input"); tagCb.type = "checkbox"; tagCb.checked = !!state.showAnomTags;
+    tagWrap.appendChild(tagCb);
+    tagWrap.appendChild(document.createTextNode(" Tag unusual activity on the chart"));
+    tagWrap.appendChild((function(){ var s = document.createElement("span"); s.className = "anomtag-key";
+      s.innerHTML = ' <span class="ak ak-h"></span><span class="ak ak-m"></span><span class="ak ak-l"></span> by severity'; return s; })());
+    tagCb.addEventListener("change", function(){
+      state.showAnomTags = tagCb.checked;
+      try { window.localStorage.setItem(ANOMTAGS_KEY, tagCb.checked ? "1" : "0"); } catch(e){}
+      drawChart();
+    });
+    host.appendChild(tagWrap);
 
     var form = document.createElement("div"); form.className = "events-form"; form.style.display = "none";
     var dIn = document.createElement("input"); dIn.type = "date"; dIn.title = "Date (start of a period)";

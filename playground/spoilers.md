@@ -90,7 +90,7 @@ over three years.
   - **Fry's gym he forgot to cancel** — `JOG-O-TRON GYM`, **$44.99/mo**, Sep 2997
     → Dec 2998 (16 months, ~$720 down the drain; he went twice).
   - **Bender's booze-of-the-month club** — `LOBRAU PLATINUM CLUB`, **$89.99/mo**,
-    May 2998 → Sep 2999, billed to the Mastercard he never pays off.
+    a short binge May–Oct 2998, billed to the Mastercard he never pays off.
 
   These are the **only two life events marked** on the chart, and their bands
   **overlap through 2998**, where the shading stacks darker — the period-overlap
@@ -114,6 +114,10 @@ over three years.
   amounts aren't natural) — Business+. (This synthetic data has no near-threshold
   *structuring* or irregular *round-number* clusters, so Business and Public happen
   to coincide here — on real data Public adds the round-number-to-individual flags.)
+  Every dated/ranged flag is also **auto-tagged on the cash-flow chart** (a diamond
+  for a single date, a short bar for a month or streak, coloured by severity) — they
+  follow the lens and filters, so they appear/disappear as you switch persona or
+  filter by person. Toggle them off under the chart.
 - **Life-event markers.** `config/events.toml` marks just **two** events on the
   cash-flow chart, both shaded **period bands** in their own colours: *Fry's gym*
   and *Bender's booze club* (see above), which overlap through 2998. Add your own

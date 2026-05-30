@@ -258,8 +258,8 @@ for y, m in month_iter(2997, 9, 2998, 12):
     mc.append(["JOG-O-TRON GYM", "PURCHASE", "FRY",
                dt.date(y, m, 6).strftime("%m/%d/%Y"), "08:05 AM", amt(-44.99)])
 #   B) Bender's booze-of-the-month club on the card he never pays off —
-#      LOBRAU PLATINUM CLUB $89.99/mo, May 2998 → Sep 2999 (overlaps A through 2998).
-for y, m in month_iter(2998, 5, 2999, 9):
+#      LOBRAU PLATINUM CLUB $89.99/mo, May–Oct 2998 (a short binge overlapping A).
+for y, m in month_iter(2998, 5, 2998, 10):
     bmc.append(["LOBRAU PLATINUM CLUB", "PURCHASE", "BENDER",
                 dt.date(y, m, 6).strftime("%m/%d/%Y"), "08:05 PM", amt(-89.99)])
 
