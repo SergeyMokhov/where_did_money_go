@@ -162,13 +162,20 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="cards" id="cards"></div>
 
   <!-- Cash flow over time -->
-  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. The chart picks its own resolution — daily, weekly or monthly — so a short window still shows fine detail (the label by the buttons tells you which). The dashed line is a rolling-average baseline. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
+  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
   <div class="panel">
-    <div class="chips" id="range-buttons" style="margin-bottom:10px;">
+    <div class="chips" id="range-buttons" style="margin-bottom:8px;">
       <button class="btn active" data-range="all" type="button">All</button>
       <button class="btn" data-range="12" type="button">12 mo</button>
       <button class="btn" data-range="ytd" type="button">YTD</button>
       <span id="cashflow-res" class="muted" style="font-size:12px;align-self:center;margin-left:4px;"></span>
+    </div>
+    <div class="chips" id="gran-buttons" style="margin-bottom:10px;">
+      <span class="muted" style="font-size:12px;align-self:center;margin-right:2px;">Buckets:</span>
+      <button class="btn active" data-gran="auto" type="button">Auto</button>
+      <button class="btn" data-gran="week" type="button">Weekly</button>
+      <button class="btn" data-gran="biweek" type="button">Bi-weekly</button>
+      <button class="btn" data-gran="month" type="button">Monthly</button>
     </div>
     <div id="cashflow-chart"></div>
     <div class="muted" style="font-size:12px;margin-top:6px;">Tip: drag across the chart to filter every section to that date range.</div>
@@ -342,26 +349,34 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     {key:"kinds",         label:"Kind"}
   ];
 
+  function freshNeg(){ return {persons:false, accounts:false, categories:false, subcategories:false, kinds:false}; }
   var state = {
     persons:new Set(), accounts:new Set(), categories:new Set(), subcategories:new Set(),
-    kinds:new Set(), monthFrom:null, monthTo:null, search:"", amtMin:null, amtMax:null
+    kinds:new Set(), monthFrom:null, monthTo:null, search:"", searchExclude:"", amtMin:null, amtMax:null,
+    // Per-facet negation: when neg[key] is true, the selected values are EXCLUDED
+    // rather than required (e.g. "Kind ≠ income", "Category ≠ Transfers").
+    neg: freshNeg()
   };
-  // Merchant search is a regex (case-insensitive). Compiled once per rerender;
-  // null when empty or invalid (then we fall back to a literal substring match).
-  var SEARCH_RE = null, SEARCH_BAD = false;
+  // Merchant search/exclude are regexes (case-insensitive). Compiled once per
+  // rerender; null when empty or invalid (then we fall back to substring match).
+  var SEARCH_RE = null, SEARCH_BAD = false, EXCL_RE = null, EXCL_BAD = false;
   function compileSearch(){
-    SEARCH_RE = null; SEARCH_BAD = false;
-    if(!state.search) return;
-    try { SEARCH_RE = new RegExp(state.search, "i"); }
-    catch(e){ SEARCH_BAD = true; }
+    SEARCH_RE = null; SEARCH_BAD = false; EXCL_RE = null; EXCL_BAD = false;
+    if(state.search){ try { SEARCH_RE = new RegExp(state.search, "i"); } catch(e){ SEARCH_BAD = true; } }
+    if(state.searchExclude){ try { EXCL_RE = new RegExp(state.searchExclude, "i"); } catch(e){ EXCL_BAD = true; } }
+  }
+  // A facet passes if no selection, or (selection contains the value) XOR negated.
+  function facetPass(key, val){
+    var sel = state[key]; if(!sel.size) return true;
+    return state.neg[key] ? !sel.has(val) : sel.has(val);
   }
 
   function passes(t){
-    if(state.persons.size       && !state.persons.has(t.person))           return false;
-    if(state.accounts.size      && !state.accounts.has(t.account))         return false;
-    if(state.categories.size    && !state.categories.has(t.category))      return false;
-    if(state.subcategories.size && !state.subcategories.has(t.subcategory))return false;
-    if(state.kinds.size         && !state.kinds.has(t.kind))               return false;
+    if(!facetPass("persons", t.person))           return false;
+    if(!facetPass("accounts", t.account))         return false;
+    if(!facetPass("categories", t.category))      return false;
+    if(!facetPass("subcategories", t.subcategory))return false;
+    if(!facetPass("kinds", t.kind))               return false;
     if(state.monthFrom && t.month < state.monthFrom)                       return false;
     if(state.monthTo   && t.month > state.monthTo)                         return false;
     if(state.amtMin != null || state.amtMax != null){
@@ -373,12 +388,16 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       if(SEARCH_RE){ if(!SEARCH_RE.test(t.merchant)) return false; }
       else if(t.merchant.toUpperCase().indexOf(state.search.toUpperCase()) === -1) return false;
     }
+    if(state.searchExclude){
+      if(EXCL_RE){ if(EXCL_RE.test(t.merchant)) return false; }
+      else if(t.merchant.toUpperCase().indexOf(state.searchExclude.toUpperCase()) !== -1) return false;
+    }
     return true;
   }
   function anyFilterActive(){
     return state.persons.size || state.accounts.size || state.categories.size ||
       state.subcategories.size || state.kinds.size || state.monthFrom || state.monthTo ||
-      state.search || state.amtMin != null || state.amtMax != null;
+      state.search || state.searchExclude || state.amtMin != null || state.amtMax != null;
   }
 
   // ---------- aggregation (mirrors wdmg/src/analytics) ----------
@@ -430,7 +449,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     rows.forEach(function(t){
       if(t.kind !== kind) return;
       var mag = kind === "spend" ? Math.abs(toCents(t.amount)) : toCents(t.amount);
-      var key = t.category + " " + t.subcategory;
+      var key = t.category + "\u241F" + t.subcategory;
       var e = g[key] || (g[key] = {category:t.category, subcategory:t.subcategory, total:0, count:0});
       e.total += mag; e.count += 1;
     });
@@ -781,7 +800,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     (RECON.external || []).forEach(function(e){ externalIds[e.to] = 1; });
     function addEdge(from, to, cents){
       nodeSet[from] = 1; nodeSet[to] = 1;
-      var k = from + " " + to, e = edgeMap[k] || (edgeMap[k] = {from:from, to:to, net:0, count:0});
+      var k = from + "\u241F" + to, e = edgeMap[k] || (edgeMap[k] = {from:from, to:to, net:0, count:0});
       e.net += cents; e.count += 1;
     }
     pairs.forEach(function(p){ addEdge(p.from_account, p.to_account, Math.abs(toCents(p.amount))); });
@@ -954,18 +973,34 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     if(spanDays <= 366 * 7) return "week";
     return "month";
   }
+  // A fixed Monday epoch anchor for week / bi-week bucketing (1970-01-05 was a Monday).
+  var WEEK_ANCHOR = Date.UTC(1970, 0, 5);
   // Bucket-start timestamp in SECONDS (uPlot x is seconds; dateMs returns ms).
   function bucketSec(ms, gran){
     var d = new Date(ms);
     if(gran === "month") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+    if(gran === "biweek"){
+      var nb = Math.floor((ms - WEEK_ANCHOR) / (14 * DAY_MS));
+      return (WEEK_ANCHOR + nb * 14 * DAY_MS) / 1000;
+    }
     if(gran === "week"){
-      var mondayMs = ms - ((d.getUTCDay() + 6) % 7) * DAY_MS, w = new Date(mondayMs);
-      return Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()) / 1000;
+      var nw = Math.floor((ms - WEEK_ANCHOR) / (7 * DAY_MS));
+      return (WEEK_ANCHOR + nw * 7 * DAY_MS) / 1000;
     }
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000;
   }
-  var GRAN_LABEL = { day: "daily", week: "weekly", month: "monthly" };
-  function buildSeries(rows){
+  var GRAN_LABEL = { day: "daily", week: "weekly", biweek: "bi-weekly", month: "monthly" };
+  var GRAN_WIN = { day: 30, week: 4, biweek: 3, month: 3 }; // trailing baseline window
+  // Compact axis numbers: 50000 -> "50k", -20000 -> "-20k", 1200000 -> "1.2M".
+  function fmtAxisNum(v){
+    var a = Math.abs(v);
+    if(a >= 1e6) return (v / 1e6).toFixed(a % 1e6 ? 1 : 0) + "M";
+    if(a >= 1e3) return (v / 1e3).toFixed(a % 1e3 ? 1 : 0) + "k";
+    return "" + v;
+  }
+  // forceGran: "auto" (or falsy) picks granularity from the span; otherwise it is
+  // pinned to "week" / "biweek" / "month" regardless of zoom.
+  function buildSeries(rows, forceGran){
     var hasFlow = rows.some(isFlow);
     var items = [], minMs = Infinity, maxMs = -Infinity;
     rows.forEach(function(t){
@@ -976,13 +1011,14 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       var p = flowParts(t); items.push([ms, p[0], p[1]]);
     });
     if(!items.length) return { xs:[], inflow:[], outflow:[], net:[], base:[], gran:"day" };
-    var gran = pickGran((maxMs - minMs) / DAY_MS + 1);
+    var gran = (forceGran && forceGran !== "auto")
+      ? forceGran : pickGran((maxMs - minMs) / DAY_MS + 1);
     var b = {};
     items.forEach(function(it){ var k = bucketSec(it[0], gran);
       var o = b[k] || (b[k] = { i:0, o:0 }); o.i += it[1]; o.o += it[2]; });
     var keys = Object.keys(b).map(Number).sort(function(a, c){ return a - c; });
     var nets = keys.map(function(k){ return b[k].i - b[k].o; });
-    var win = gran === "day" ? 30 : gran === "week" ? 4 : 3; // trailing baseline window
+    var win = GRAN_WIN[gran] || 3;
     var xs = [], inflow = [], outflow = [], net = [], base = [];
     keys.forEach(function(k, i){ var o = b[k], nv = o.i - o.o;
       xs.push(k); inflow.push(o.i / 100); outflow.push(Math.abs(o.o) / 100); net.push(nv / 100);
@@ -993,12 +1029,18 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     var b = document.querySelector("#range-buttons .active");
     return b ? b.getAttribute("data-range") : "all";
   }
+  function activeGran(){
+    var b = document.querySelector("#gran-buttons .active");
+    return b ? b.getAttribute("data-gran") : "auto";
+  }
   function drawChart(){
     if(!window.uPlot || !chartEl) return;
-    var s = buildSeries(rangeFilterRows(lastRows, activeRange()));
+    var s = buildSeries(rangeFilterRows(lastRows, activeRange()), activeGran());
     var xs = s.xs, inflow = s.inflow, outflow = s.outflow, net = s.net, base = s.base;
     var resEl = document.getElementById("cashflow-res");
-    if(resEl) resEl.textContent = xs.length ? (GRAN_LABEL[s.gran] + " · " + xs.length + " pts") : "";
+    if(resEl) resEl.textContent = xs.length
+      ? (GRAN_LABEL[s.gran] + (activeGran() === "auto" ? " (auto)" : "") + " · " + xs.length + " pts")
+      : "";
     if(uplotInst){ uplotInst.destroy(); uplotInst = null; }
     var empty = document.getElementById("cashflow-empty");
     if(!xs.length){ if(empty) empty.style.display = "block"; return; }
@@ -1008,7 +1050,11 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     uplotInst = new uPlot({
       width: chartEl.clientWidth || 640, height: 300,
       legend: { live: true },
-      axes: [ { stroke: stroke }, { stroke: stroke } ],
+      // Compact y labels (50k, -20k, 1.2M) so big amounts don't overflow the gutter;
+      // size reserves enough room for the widest label.
+      axes: [ { stroke: stroke },
+              { stroke: stroke, size: 58,
+                values: function(u, vals){ return vals.map(fmtAxisNum); } } ],
       scales: { x: { time: true } },
       // Drag selects a date range to filter by (instead of zooming the axis):
       // setScale:false keeps the selection box, and the mouseup hook below turns
@@ -1056,7 +1102,8 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   // ---------- filter UI ----------
   function facetBtnLabel(def){
     var sel = state[def.key];
-    return def.label + (sel.size ? ' <span class="cnt">(' + sel.size + ')</span>' : ' <span class="cnt muted">· all</span>');
+    var op = (sel.size && state.neg[def.key]) ? ' <span class="cnt neg">≠</span>' : '';
+    return def.label + op + (sel.size ? ' <span class="cnt">(' + sel.size + ')</span>' : ' <span class="cnt muted">· all</span>');
   }
   function buildFilterBar(){
     var bar = document.getElementById("filterbar");
@@ -1073,6 +1120,15 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       var mini = document.createElement("div"); mini.className = "mini";
       var all = document.createElement("a"); all.textContent = "all"; var none = document.createElement("a"); none.textContent = "none";
       mini.appendChild(all); mini.appendChild(none); menu.appendChild(mini);
+      // Negate toggle: treat the selection as an EXCLUDE list instead of include.
+      var negRow = document.createElement("label");
+      negRow.style.cssText = "display:flex;gap:6px;align-items:center;font-size:12px;border-top:1px solid var(--line);margin-top:4px;padding-top:6px;";
+      var ncb = document.createElement("input"); ncb.type = "checkbox"; ncb.checked = !!state.neg[def.key];
+      ncb.addEventListener("change", function(){
+        state.neg[def.key] = ncb.checked; btn.innerHTML = facetBtnLabel(def); rerender();
+      });
+      var nsp = document.createElement("span"); nsp.textContent = "exclude selected (≠)";
+      negRow.appendChild(ncb); negRow.appendChild(nsp); menu.appendChild(negRow);
       values.forEach(function(v){
         var l = document.createElement("label");
         var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = v;
@@ -1087,7 +1143,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       all.addEventListener("click", function(){ state[def.key] = new Set(); // all = no constraint
         menu.querySelectorAll("input").forEach(function(cb){ cb.checked = false; });
         btn.innerHTML = facetBtnLabel(def); rerender(); });
-      none.addEventListener("click", function(){ state[def.key] = new Set([" none "]); // impossible value
+      none.addEventListener("click", function(){ state[def.key] = new Set(["\u241Fnone\u241F"]); // impossible value
         menu.querySelectorAll("input").forEach(function(cb){ cb.checked = false; });
         btn.innerHTML = facetBtnLabel(def); rerender(); });
       btn.addEventListener("click", function(ev){ ev.stopPropagation();
@@ -1147,12 +1203,26 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     });
     bar.appendChild(search);
 
+    var searchEx = document.createElement("input"); searchEx.type = "text"; searchEx.id = "search-excl";
+    searchEx.placeholder = "exclude merchant regex…"; searchEx.value = state.searchExclude;
+    searchEx.title = "Case-insensitive regex; transactions whose merchant MATCHES are excluded (e.g. ABM)";
+    var stx;
+    searchEx.addEventListener("input", function(){
+      clearTimeout(stx); stx = setTimeout(function(){
+        state.searchExclude = searchEx.value.trim();
+        compileSearch();
+        searchEx.style.borderColor = EXCL_BAD ? "var(--neg)" : "var(--line)";
+        rerender();
+      }, 200);
+    });
+    bar.appendChild(searchEx);
+
     var reset = document.createElement("button"); reset.type = "button"; reset.className = "btn"; reset.textContent = "Reset";
     reset.addEventListener("click", function(){
       state.persons = new Set(); state.accounts = new Set(); state.categories = new Set();
       state.subcategories = new Set(); state.kinds = new Set();
-      state.monthFrom = null; state.monthTo = null; state.search = "";
-      state.amtMin = null; state.amtMax = null;
+      state.monthFrom = null; state.monthTo = null; state.search = ""; state.searchExclude = "";
+      state.amtMin = null; state.amtMax = null; state.neg = freshNeg();
       buildFilterBar(); rerender();
     });
     bar.appendChild(reset);
@@ -1173,9 +1243,9 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     }
     FACET_DEFS.forEach(function(def){
       var sel = state[def.key]; if(!sel.size) return;
-      var vals = Array.from(sel).filter(function(v){ return v !== " none "; });
-      var txt = sel.has(" none ") ? "none" : vals.join(", ");
-      pill(def.label, function(){ state[def.key] = new Set(); buildFilterBar(); rerender(); }, txt);
+      var vals = Array.from(sel).filter(function(v){ return v !== "\u241Fnone\u241F"; });
+      var txt = (state.neg[def.key] ? "\u2260 " : "") + (sel.has("\u241Fnone\u241F") ? "none" : vals.join(", "));
+      pill(def.label, function(){ state[def.key] = new Set(); state.neg[def.key] = false; buildFilterBar(); rerender(); }, txt);
     });
     if(state.monthFrom || state.monthTo)
       pill("Months", function(){ state.monthFrom = null; state.monthTo = null; buildFilterBar(); rerender(); },
@@ -1240,6 +1310,14 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   if(rb){ rb.addEventListener("click", function(ev){
     var b = ev.target.closest("button[data-range]"); if(!b) return;
     rb.querySelectorAll("button").forEach(function(x){ x.classList.remove("active"); });
+    b.classList.add("active"); drawChart();
+  }); }
+
+  // Bucketing mode: Auto (granularity from the zoom) / Weekly / Bi-weekly / Monthly.
+  var gb = document.getElementById("gran-buttons");
+  if(gb){ gb.addEventListener("click", function(ev){
+    var b = ev.target.closest("button[data-gran]"); if(!b) return;
+    gb.querySelectorAll("button").forEach(function(x){ x.classList.remove("active"); });
     b.classList.add("active"); drawChart();
   }); }
 

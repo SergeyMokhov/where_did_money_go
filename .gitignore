@@ -14,6 +14,9 @@ report.html
 # Playground: the demo data is committed (generate once, use forever — it's
 # seeded/deterministic). Only the per-run analysis artifacts below stay ignored.
 
+# Local-only convenience scripts (reference private paths — never commit)
+*.local.sh
+
 # Editor / OS cruft
 *.swp
 .DS_Store

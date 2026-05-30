@@ -54,6 +54,13 @@ display_name = "Bender Rodríguez"
   filename = "(?i)bender"
   profile = "bank_ledger"
   kind = "debit"
+  # Bender's Mastercard (cardholder BENDER) — which he never pays off, so it just
+  # accrues purchases with no matching PAYMENT.
+  [[person.account]]
+  id = "Bender Mastercard"
+  cardholder = "BENDER"
+  profile = "mastercard_credit"
+  kind = "credit_card"
 
 # External investment accounts (declared, never sourced from a file).
 [[person]]

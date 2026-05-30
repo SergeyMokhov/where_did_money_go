@@ -44,6 +44,7 @@ ch = []   # bank_ledger  (joint chequing): Date, Transaction, Name, Memo, Amount
 sv = []   # bank_ledger  (joint savings)
 fb = []   # first_bank_card (Leela):  card, Type, Date Posted, Amount, Description
 bn = []   # bank_ledger  (Bender):    Date, Transaction, Name, Memo, Amount
+bmc = []  # mastercard_credit (Bender's card he never pays off): same cols as mc
 
 
 def amt(x):
@@ -65,6 +66,16 @@ def mc_buy(name, dollars, d, kind="PURCHASE"):
     sign = -1 if kind == "PURCHASE" else 1
     mc.append([name, kind, "FRY", d.strftime("%m/%d/%Y"),
                f"{h12:02d}:{random.randint(0,59):02d} {ampm}", amt(sign * dollars)])
+
+
+def bmc_buy(name, dollars, d, kind="PURCHASE"):
+    # Bender's Mastercard (cardholder BENDER). He only ever PURCHASEs on it.
+    hour = random.randint(7, 23)
+    ampm = "AM" if hour < 12 else "PM"
+    h12 = hour if 1 <= hour <= 12 else (hour - 12 if hour > 12 else 12)
+    sign = -1 if kind == "PURCHASE" else 1
+    bmc.append([name, kind, "BENDER", d.strftime("%m/%d/%Y"),
+                f"{h12:02d}:{random.randint(0,59):02d} {ampm}", amt(sign * dollars)])
 
 
 def rw_buy(name, dollars, d, cat):
@@ -200,13 +211,29 @@ for y, m in month_iter(2997, 1, 2999, 12):
     bn_row("BENDING GYM", -29.99, day(8), "DEBIT")
     if m % 5 == 0:  # Bender also likes a gas-station sandwich now and then
         bn_row("GAS-N-GULP SANDWICH CO", -u(6, 12), rday(y, m), "DEBIT")
+    # Bender's Mastercard — he NEVER pays it off (no PAYMENT rows are ever emitted
+    # for it), so the balance just keeps climbing. More booze, cigars, and casino
+    # cash advances to feed the habit.
+    for _ in range(3):
+        bmc_buy(random.choice(BOOZE), u(25, 90), rday(y, m))
+    bmc_buy(random.choice(CIGARS), u(20, 80), rday(y, m))
+    bmc_buy("LUNAR VEGAS CASINO CASH ADVANCE", u(lo_g * 0.3, hi_g * 0.4), rday(y, m))
 
     # === Household transfers (matched pairs + external investments) =============
+    # Fry's card payment (the one card that DOES get paid off).
     ch_row("BILL PAYMENT - PLANET EXPRESS MASTERCARD", -PAY, day(25), "DEBIT")
     mc_buy("PAYMENT - THANK YOU", PAY, day(25), kind="PAYMENT")
+    # Both Fry and Leela fund the joint accounts from their OWN accounts:
+    #   Fry — salary lands in joint chequing; he sweeps a fixed amount to savings.
     ch_row("TRANSFER TO SAVINGS", -SAV, day(26), "DEBIT")
-    sv_row("TRANSFER FROM CHEQUING", SAV, day(26), "CREDIT")
-    ch_row("RRSP CONTRIBUTION", -300.00, day(27), "DEBIT")
+    sv_row("TRANSFER FROM FRY CHEQUING", SAV, day(26), "CREDIT")
+    #   Leela — tops up the joint chequing and savings from her first-bank card.
+    fb_row("TRANSFER TO JOINT CHEQUING", -900.00, day(2), "DEBIT")
+    ch_row("TRANSFER FROM LEELA", 900.00, day(2), "CREDIT")
+    fb_row("TRANSFER TO SAVINGS", -300.00, day(28), "DEBIT")
+    sv_row("TRANSFER FROM LEELA", 300.00, day(28), "CREDIT")
+    # Only LEELA contributes to an RRSP (from her own account); the TFSA is joint.
+    fb_row("RRSP CONTRIBUTION", -300.00, day(27), "DEBIT")
     ch_row("TFSA TRANSFER", -200.00, day(27), "DEBIT")
     if m % 2 == 0:
         ch_row("INTERAC E-TRANSFER TO: LEELA", -u(100, 300), day(20), "OTHER")
@@ -236,6 +263,10 @@ def by_date_mdY(r, i):
 mc.sort(key=lambda r: by_date_mdY(r, 3))
 write_csv(os.path.join(DATA, "fry_mastercard_7011.csv"),
           ["Description", "Type", "Card Holder Name", "Date", "Time", "Amount"], mc, quote_all=True)
+
+bmc.sort(key=lambda r: by_date_mdY(r, 3))
+write_csv(os.path.join(DATA, "bender_mastercard_3345.csv"),
+          ["Description", "Type", "Card Holder Name", "Date", "Time", "Amount"], bmc, quote_all=True)
 
 rw.sort(key=lambda r: by_date_mdY(r, 0))
 write_csv(os.path.join(DATA, "fry_rewards_7012.csv"),
@@ -268,6 +299,6 @@ with open(fb_path, "w", newline="", encoding="utf-8-sig") as f:
     for r in fb:
         w.writerow(r)
 
-print(f"wrote {len(mc)} mastercard, {len(rw)} rewards, {len(ch)} chequing "
-      f"({len(recent)} dup'd), {len(sv)} savings, {len(fb)} first-bank, "
-      f"{len(bn)} bender rows into {DATA}")
+print(f"wrote {len(mc)} fry-mastercard, {len(bmc)} bender-mastercard, {len(rw)} rewards, "
+      f"{len(ch)} chequing ({len(recent)} dup'd), {len(sv)} savings, {len(fb)} first-bank, "
+      f"{len(bn)} bender-ledger rows into {DATA}")

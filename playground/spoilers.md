@@ -22,7 +22,10 @@ roughly **-$210,000 net**. The money evaporates into, in order:
 2. **e-Transfers to fembots** — ANGELYNE, BIG BERTHA, FEMBOT FANTASIES, LUSTRON
    ESCORTS. These are *transfers* (not "spend"), so they hide from the spend
    charts — you find them in the **E-transfers** section / transfer graph.
-3. **Booze & cigars** — LOBRAU, DRINKS DEPOT, EL CHEAPO CIGARS (~$14k).
+3. **Booze & cigars** — LOBRAU, DRINKS DEPOT, EL CHEAPO CIGARS.
+4. **A credit card he never pays off** — his Mastercard (cardholder BENDER) racks
+   up booze, cigars and casino *cash advances* with **no `PAYMENT - THANK YOU`
+   ever** (unlike Fry's card, which is paid monthly). The balance just climbs.
 
 To twist the knife, his **factory job ends in July 2999** (the IRONWORKS payroll
 stops), so income drops just as the gambling peaks.
@@ -34,8 +37,10 @@ stops), so income drops just as the gambling peaks.
 - **Top merchants** → the casinos sit at the top.
 - **E-transfers** → the fembot recipients, growing year over year. (Toggle
   **Person = bender** and read who he paid.)
-- **Trends** → gambling trending sharply up; **By account** shows the IRONWORKS
-  salary disappearing mid-2999.
+- **By account** → *Bender Mastercard* shows only purchases and **no card
+  payment** (compare with *Fry Mastercard*, which is paid off monthly); the
+  IRONWORKS salary on *Bender Ledger* disappears mid-2999.
+- **Trends** → gambling trending sharply up.
 
 ---
 
