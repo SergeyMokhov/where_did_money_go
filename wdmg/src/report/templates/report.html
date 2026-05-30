@@ -688,11 +688,43 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     var inM = (!state.monthFrom || mo >= state.monthFrom) && (!state.monthTo || mo <= state.monthTo);
     return state.negMonths ? !inM : inM;
   }
+  // Selection context for judging aggregate-anomaly relevance. Aggregate (month/
+  // dataset) anomalies are precomputed by the engine over the WHOLE dataset and
+  // can't be re-derived client-side for a narrowed view, so instead of ignoring the
+  // filters (which made them feel "stuck"), we test relevance against the currently
+  // filtered rows: `present` holds every "category|YYYY-MM" still in the selection,
+  // and `narrowed` is true once any facet/search/amount/month filter is active.
+  var ANOM_CTX = { present: Object.create(null), narrowed: false };
+  function refreshAnomCtx(){
+    var rows = lastRows || [], present = Object.create(null);
+    for(var i = 0; i < rows.length; i++){ present[rows[i].category + "|" + rows[i].month] = 1; }
+    ANOM_CTX.present = present;
+    ANOM_CTX.narrowed = facetActive("persons") || facetActive("accounts") ||
+      facetActive("subcategories") || facetActive("categories") || facetActive("kinds") ||
+      !!state.search || !!state.searchExclude ||
+      state.amtMin != null || state.amtMax != null ||
+      !!state.monthFrom || !!state.monthTo;
+  }
   function anomalyPasses(a){
     if(!methodVisible(a.method)) return false;
     if(a.category && !facetPass("categories", a.category)) return false;
-    if(a.scope === "dataset") return true; // spans the whole selection
-    if(a.scope === "month") return anomalyMonthInRange((a.period_or_date || "").slice(0,7));
+    // A whole-dataset flag (Benford, cash-flow runway) describes the entire dataset;
+    // it's only meaningful on the un-narrowed view, so hide it once the user filters.
+    if(a.scope === "dataset") return !ANOM_CTX.narrowed;
+    if(a.scope === "month"){
+      var mo = (a.period_or_date || "").slice(0,7);
+      if(a.category){
+        // A category-month flag shows only while the filtered selection still
+        // contains spend in that category+month (so person/account/category/merchant/
+        // amount filters all narrow it through the same index).
+        if(!ANOM_CTX.present[a.category + "|" + mo]) return false;
+      } else if(ANOM_CTX.narrowed){
+        // A category-less month flag (e.g. a shift in TOTAL spending) is a whole-
+        // dataset construct anchored at a month — only meaningful on the un-narrowed view.
+        return false;
+      }
+      return anomalyMonthInRange(mo);
+    }
     // transaction scope: follow the underlying transaction's facets.
     if(!facetPass("persons", a.person || "unassigned")) return false;
     if(!facetPass("accounts", a.account || "unassigned")) return false;
@@ -958,8 +990,14 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   }
   function renderAnomalies(){
     var el = document.getElementById("anomalies-panel");
+    refreshAnomCtx(); // recompute selection context before filtering the precomputed list
     var a = detectAnomalies().slice();
-    if(!a.length){ el.innerHTML = lensControlHtml() + '<div class="empty">Nothing unusual in the current selection.</div>'; wireLens(el); return; }
+    if(!a.length){
+      var empty = ANOM_CTX.narrowed
+        ? "No unusual activity for this filtered selection. Whole-dataset checks (cash-flow, Benford) and other people’s flags only show on the unfiltered view — clear the filters to see them."
+        : "Nothing unusual in the current selection.";
+      el.innerHTML = lensControlHtml() + '<div class="empty">' + empty + '</div>'; wireLens(el); return;
+    }
     // Most serious first, then biggest amount.
     a.sort(function(x, y){
       var rx = SEV_RANK[sevClass(x)], ry = SEV_RANK[sevClass(y)];
