@@ -88,6 +88,13 @@ over three years.
   — see *Pets → Pet Supplies & Vet* under **Person = leela**.
 - **Cross-file dedup.** `joint_chequing_recent.csv` overlaps the last two months of
   `joint_chequing.csv`; the **dedup footer** reports the rows collapsed.
+- **Unusual activity battery.** The playground runs with `analysis_profile =
+  "public"` (`config/settings.toml`), so **every** detector is on — including the
+  forensic ones. Look for: a **Benford** flag (the synthetic amounts aren't
+  natural), a **deficit streak** (Bender's 2998 spending run), a **spending shift**
+  (the 2998 rent flip), **season-adjusted** spikes, the two **rare big purchases**
+  (Mars Vegas, the jewellery gift), and a couple of **duplicate charges**. Switch
+  `settings.toml` to `consumer` to hide the forensic flags and see the everyday set.
 - **Life-event markers.** `config/events.toml` plants four amber markers on the
   cash-flow chart (crew hired, Mars Vegas getaway, Fry's inheritance, Bender's
   factory job ending). Watch how Bender's marker sits right where his income drops
