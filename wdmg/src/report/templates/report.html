@@ -155,6 +155,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 .event-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);
   border-radius:999px;padding:2px 8px;background:var(--chip);}
 .event-chip .ev-dot{width:8px;height:8px;border-radius:50%;flex:none;}
+.event-chip .ev-dot.ev-span{width:16px;height:6px;border-radius:2px;}
 .event-chip.ev-user .ev-dot{background:#8a63d2;} .event-chip.ev-config .ev-dot{background:#c98a2c;}
 .event-chip .x{cursor:pointer;font-weight:700;opacity:.7;margin-left:2px;} .event-chip .x:hover{opacity:1;color:var(--neg);}
 .event-chip .ev-tag{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
@@ -192,7 +193,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="cards" id="cards"></div>
 
   <!-- Cash flow over time -->
-  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. Vertical markers are life events (amber = shared from config, purple = added by you) so you can see how a milestone lined up with your money. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
+  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. Life events are overlaid (amber = shared from config, purple = added by you) so you can see how a milestone lined up with your money: a single date shows as a vertical marker, a date range as a shaded band (e.g. a renovation or a stretch between jobs). What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range.">i</span></h2>
   <div class="panel">
     <div class="chips" id="range-buttons" style="margin-bottom:8px;">
       <button class="btn active" data-range="all" type="button">All</button>
@@ -322,27 +323,34 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   // never touch any computed number.
   var EVENTS_KEY = "wdmg.events.v1";
   function isIsoDate(s){ return /^\d{4}-\d{2}-\d{2}$/.test(s || ""); }
+  // An event is a *period* (shaded band) when it carries a valid end strictly after
+  // its start; otherwise it's a *point* (vertical marker). `allEvents` normalizes a
+  // missing/invalid/≤start end to "" so this is a simple truthiness check.
+  function isPeriod(e){ return !!(e && e.end); }
   function cfgEvents(){
     return (Array.isArray(A.events) ? A.events : []).map(function(e){
-      return { date:e.date, label:e.label, note:e.note || "", source:"config" }; });
+      return { date:e.date, end:e.end || "", label:e.label, note:e.note || "", source:"config" }; });
   }
   function userEvents(){
     try {
       var raw = window.localStorage.getItem(EVENTS_KEY);
       var arr = raw ? JSON.parse(raw) : [];
       return (Array.isArray(arr) ? arr : []).map(function(e){
-        return { date:e.date, label:e.label, note:e.note || "", source:"user" }; });
+        return { date:e.date, end:e.end || "", label:e.label, note:e.note || "", source:"user" }; });
     } catch(e){ return []; }
   }
   function saveUserEvents(list){
     try { window.localStorage.setItem(EVENTS_KEY, JSON.stringify(list.map(function(e){
-      return { date:e.date, label:e.label, note:e.note || "" }; }))); return true; }
+      return { date:e.date, end:e.end || "", label:e.label, note:e.note || "" }; }))); return true; }
     catch(e){ return false; }
   }
-  // Config + user events, validated and sorted by date (stable, ascending).
+  // Config + user events, validated and sorted by start date (stable, ascending).
+  // A period's end is kept only when it's a real date strictly after the start;
+  // anything else collapses to a point so downstream rendering can trust `e.end`.
   function allEvents(){
     var all = cfgEvents().concat(userEvents()).filter(function(e){
       return e && isIsoDate(e.date) && e.label && String(e.label).trim(); });
+    all.forEach(function(e){ if(!(e.end && isIsoDate(e.end) && e.end > e.date)) e.end = ""; });
     all.sort(function(a, b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
     return all;
   }
@@ -1261,21 +1269,63 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
         ready: [function(u){
           u.over.addEventListener("mousedown", function(){ chartDragging = true; });
         }],
-        // Draw life events as labelled vertical markers over the plotted area.
-        // Runs in device pixels (uPlot's canvas is dpr-scaled), so sizes are *dpr.
+        // Draw life events over the plotted area: periods as shaded bands (first,
+        // so point lines sit on top), points as labelled vertical markers. Runs in
+        // device pixels (uPlot's canvas is dpr-scaled), so sizes are *dpr.
         draw: [function(u){
           var evs = allEvents(); if(!evs.length) return;
           var ctx = u.ctx, dpr = u.pxRatio || window.devicePixelRatio || 1;
           var top = u.bbox.top, bot = u.bbox.top + u.bbox.height;
+          var left = u.bbox.left, right = u.bbox.left + u.bbox.width;
           var xmin = u.scales.x.min, xmax = u.scales.x.max;
+          // purple = yours, amber = shared
+          function colOf(e){ return e.source === "user" ? "#8a63d2" : "#c98a2c"; }
+          function fillOf(e){ return e.source === "user" ? "rgba(138,99,210,0.13)" : "rgba(201,138,44,0.13)"; }
+          function clampX(px){ return px < left ? left : (px > right ? right : px); }
           ctx.save();
           ctx.font = Math.round(11 * dpr) + "px system-ui, -apple-system, sans-serif";
           ctx.textBaseline = "alphabetic";
+          // Pass 1 — period bands.
           evs.forEach(function(e){
+            if(!isPeriod(e)) return;
+            var sMs = dateMs(e.date), eMs = dateMs(e.end); if(sMs == null || eMs == null) return;
+            var sTs = sMs / 1000, eTs = eMs / 1000;
+            if(eTs < xmin || sTs > xmax) return;                 // entirely off-screen
+            var x1 = clampX(u.valToPos(Math.max(sTs, xmin), "x", true));
+            var x2 = clampX(u.valToPos(Math.min(eTs, xmax), "x", true));
+            if(x2 < x1){ var t = x1; x1 = x2; x2 = t; }
+            var col = colOf(e);
+            ctx.fillStyle = fillOf(e);
+            ctx.fillRect(x1, top, Math.max(1, x2 - x1), bot - top);
+            // Dashed boundary line at each *true* edge that's actually in view.
+            ctx.strokeStyle = col; ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
+            if(sTs >= xmin){ ctx.beginPath(); ctx.moveTo(x1 + 0.5, top); ctx.lineTo(x1 + 0.5, bot); ctx.stroke(); }
+            if(eTs <= xmax){ ctx.beginPath(); ctx.moveTo(x2 - 0.5, top); ctx.lineTo(x2 - 0.5, bot); ctx.stroke(); }
+            ctx.setLineDash([]);
+            // Label: horizontal inside the band when it's wide enough, clipped to the
+            // band; otherwise climbing up the left edge like a point marker.
+            ctx.fillStyle = col;
+            var label = e.label.length > 44 ? e.label.slice(0, 43) + "…" : e.label;
+            if(x2 - x1 >= 60 * dpr){
+              ctx.save();
+              ctx.beginPath(); ctx.rect(x1, top, x2 - x1, bot - top); ctx.clip();
+              ctx.textAlign = "left";
+              ctx.fillText(label, x1 + 4 * dpr, top + 13 * dpr);
+              ctx.restore();
+            } else {
+              ctx.save();
+              ctx.translate(x1 - 3 * dpr, bot - 4 * dpr); ctx.rotate(-Math.PI / 2);
+              ctx.textAlign = "left"; ctx.fillText(label, 0, 0);
+              ctx.restore();
+            }
+          });
+          // Pass 2 — point markers.
+          evs.forEach(function(e){
+            if(isPeriod(e)) return;
             var ms = dateMs(e.date); if(ms == null) return;
             var ts = ms / 1000; if(ts < xmin || ts > xmax) return;
             var x = Math.round(u.valToPos(ts, "x", true));
-            var col = e.source === "user" ? "#8a63d2" : "#c98a2c"; // purple = yours, amber = shared
+            var col = colOf(e);
             ctx.strokeStyle = col; ctx.fillStyle = col;
             ctx.lineWidth = dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
             ctx.beginPath(); ctx.moveTo(x + 0.5, top); ctx.lineTo(x + 0.5, bot); ctx.stroke();
@@ -1519,30 +1569,37 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     host.innerHTML = "";
     var hdr = document.createElement("div"); hdr.className = "events-hdr";
     hdr.innerHTML = '<span class="events-title">Life events</span>' +
-      '<span class="muted" style="font-size:12px;">vertical markers on the chart — see how milestones line up with your money</span>';
+      '<span class="muted" style="font-size:12px;">markers (and shaded spans for periods) on the chart — see how milestones line up with your money</span>';
     var addBtn = document.createElement("button"); addBtn.type = "button"; addBtn.className = "btn"; addBtn.textContent = "+ Add event";
     hdr.appendChild(addBtn); host.appendChild(hdr);
 
     var form = document.createElement("div"); form.className = "events-form"; form.style.display = "none";
-    var dIn = document.createElement("input"); dIn.type = "date"; dIn.title = "Date (YYYY-MM-DD)";
+    var dIn = document.createElement("input"); dIn.type = "date"; dIn.title = "Date (start of a period)";
+    var toSep = document.createElement("span"); toSep.className = "muted"; toSep.style.fontSize = "12px"; toSep.textContent = "to";
+    var eIn = document.createElement("input"); eIn.type = "date"; eIn.title = "End date — optional; set it to mark a period (shaded band)";
     var lIn = document.createElement("input"); lIn.type = "text"; lIn.placeholder = "label (e.g. New job)"; lIn.maxLength = 60;
     var nIn = document.createElement("input"); nIn.type = "text"; nIn.placeholder = "note (optional)"; nIn.maxLength = 140;
     var save = document.createElement("button"); save.type = "button"; save.className = "btn"; save.textContent = "Add";
     var err = document.createElement("span"); err.className = "events-err";
-    form.appendChild(dIn); form.appendChild(lIn); form.appendChild(nIn); form.appendChild(save); form.appendChild(err);
+    form.appendChild(dIn); form.appendChild(toSep); form.appendChild(eIn);
+    form.appendChild(lIn); form.appendChild(nIn); form.appendChild(save); form.appendChild(err);
     host.appendChild(form);
     addBtn.addEventListener("click", function(){
       form.style.display = form.style.display === "none" ? "flex" : "none";
       if(form.style.display !== "none") dIn.focus();
     });
     function doAdd(){
-      var date = dIn.value, label = (lIn.value || "").trim();
+      var date = dIn.value, end = eIn.value, label = (lIn.value || "").trim();
       if(!isIsoDate(date)){ err.textContent = "pick a date"; return; }
+      if(end){
+        if(!isIsoDate(end)){ err.textContent = "end date is invalid"; return; }
+        if(end < date){ err.textContent = "end must be on/after the start date"; return; }
+      }
       if(!label){ err.textContent = "enter a label"; return; }
       var list = userEvents();
-      list.push({ date:date, label:label, note:(nIn.value || "").trim() });
+      list.push({ date:date, end:end || "", label:label, note:(nIn.value || "").trim() });
       if(!saveUserEvents(list)){ err.textContent = "couldn't save — browser storage is blocked"; return; }
-      lIn.value = ""; nIn.value = ""; err.textContent = "";
+      eIn.value = ""; lIn.value = ""; nIn.value = ""; err.textContent = "";
       renderEvents(); drawChart();
     }
     save.addEventListener("click", doAdd);
@@ -1557,14 +1614,16 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     }
     var list = document.createElement("div"); list.className = "events-list";
     evs.forEach(function(e){
+      var period = isPeriod(e);
       var chip = document.createElement("span"); chip.className = "event-chip " + (e.source === "user" ? "ev-user" : "ev-config");
-      chip.innerHTML = '<span class="ev-dot"></span><b>' + esc(e.date) + '</b> ' + esc(e.label) +
+      var when = period ? esc(e.date) + ' → ' + esc(e.end) : esc(e.date);
+      chip.innerHTML = '<span class="ev-dot' + (period ? ' ev-span' : '') + '"></span><b>' + when + '</b> ' + esc(e.label) +
         (e.note ? ' <span class="muted">— ' + esc(e.note) + '</span>' : '');
       if(e.source === "user"){
         var x = document.createElement("span"); x.className = "x"; x.textContent = "×"; x.title = "remove";
         x.addEventListener("click", function(){
           var rest = userEvents().filter(function(u){
-            return !(u.date === e.date && u.label === e.label && (u.note || "") === (e.note || "")); });
+            return !(u.date === e.date && (u.end || "") === (e.end || "") && u.label === e.label && (u.note || "") === (e.note || "")); });
           saveUserEvents(rest); renderEvents(); drawChart();
         });
         chip.appendChild(x);

@@ -102,11 +102,13 @@ over three years.
   amounts aren't natural) — Business+. (This synthetic data has no near-threshold
   *structuring* or irregular *round-number* clusters, so Business and Public happen
   to coincide here — on real data Public adds the round-number-to-individual flags.)
-- **Life-event markers.** `config/events.toml` plants four amber markers on the
-  cash-flow chart (crew hired, Mars Vegas getaway, Fry's inheritance, Bender's
-  factory job ending). Watch how Bender's marker sits right where his income drops
-  and the gambling peaks. Add your own (purple) markers from the report's
-  **Life events** control under the chart — they save in your browser.
+- **Life-event markers (points *and* periods).** `config/events.toml` plants amber
+  overlays on the cash-flow chart: three **points** (crew hired, Mars Vegas getaway,
+  Fry's inheritance) and one **period** — a shaded band for *Bender's IRONWORKS
+  factory job* (2997 → Jul 2999). Watch how the band's right edge lands right where
+  his income drops and the gambling peaks. Add your own (purple) markers — a single
+  date, or a date range for a period — from the report's **Life events** control
+  under the chart; they save in your browser.
 
 ---
 
