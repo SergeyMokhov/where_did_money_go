@@ -121,10 +121,19 @@ The same data, different fears. "✦" = top priority for that persona.
    floors so "large" means large; on degenerate spread (MAD=0, too few points)
    produce **no** false anomaly.
 3. **Normalize severity** across methods so the combined list ranks sensibly.
-4. **Persona toggle.** Add a config switch — e.g. `analysis_profile =
-   consumer | prosumer | business | public` — that enables the relevant detectors
-   and sets jurisdiction params (structuring threshold/currency). A consumer
-   shouldn't see Benford; a public figure should. Defaults stay conservative.
+4. **Persona lens (live, nested).** The engine **always computes every detector**;
+   the report exposes a `consumer | prosumer | business | public` lens that *filters
+   the precomputed list* client-side, so a reader can switch personas without
+   re-running. The lens is a strict **nesting** — each level adds checks on top of
+   the simpler one:
+   - **consumer** — fraud + waste + amount outliers (the actionable everyday set).
+   - **prosumer** — *+ time-series* (`seasonal_residual`, `change_point`).
+   - **business** — *+ expense/cash forensics* (`benford`, `structuring`).
+   - **public** — *+ round-number payments to individuals* (`round_number`; optics).
+
+   `settings.toml`'s `analysis_profile` only picks the **default** lens the report
+   opens with; jurisdiction params (structuring threshold/currency) still come from
+   settings. Defaults stay conservative (consumer).
 5. **Deterministic.** Same inputs → byte-identical `analysis.json`. Implement in the
    Rust engine **and** mirror in the report's client-side recompute (they must
    agree, as `rare_large` now does).

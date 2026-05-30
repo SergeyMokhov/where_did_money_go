@@ -26,13 +26,19 @@
 //! `subscription_increase` (a recurring charge that stepped up), `card_testing` (a
 //! burst of tiny charges across ≥3 merchants).
 //!
-//! Time-series (all profiles): `change_point` (a sustained shift in monthly
-//! spending), `seasonal_residual` (a month high even for its season; recurring
-//! excluded, capped per category), `cashflow_runway` (a multi-month deficit streak).
+//! Time-series: `change_point` (a sustained shift in monthly spending),
+//! `seasonal_residual` (a month high even for its season; recurring excluded,
+//! capped per category), `cashflow_runway` (a multi-month deficit streak).
 //!
-//! Forensic/compliance (`business`/`public` profiles only): `structuring`
-//! (clustered near-threshold amounts), `round_number` (repeated irregular round
-//! transfers to one counterparty), `benford` (leading-digit χ² conformity).
+//! Forensic/compliance: `structuring` (clustered near-threshold amounts),
+//! `round_number` (repeated irregular round transfers to one counterparty),
+//! `benford` (leading-digit χ² conformity).
+//!
+//! **The engine always computes every detector** so the report can switch persona
+//! lenses live. The lens is a *nested* view filter applied in the report, not here:
+//! consumer (fraud + waste + amount outliers) ⊂ prosumer (+ time-series:
+//! `seasonal_residual`, `change_point`) ⊂ business (+ `benford`, `structuring`) ⊂
+//! public (+ `round_number`). [`AnalysisProfile`] only sets the *default* lens.
 //!
 //! Magnitudes are exact [`Decimal`]; only dimensionless ratios (z-scores, χ²) are
 //! `f64`. Each anomaly carries `scope` (transaction/month/dataset), a numeric-ish
@@ -61,6 +67,11 @@ const MIN_POOL: usize = 4;
 
 /// Log-space z-score threshold for a rare-subcategory large purchase.
 const RARE_LARGE_Z: f64 = 3.0;
+
+/// Cap on `mad_zscore` flags emitted per subcategory. Over a long history one
+/// subcategory can produce many robust outliers; only the most extreme few are
+/// worth surfacing (the rest are a long, low-value tail).
+const MAX_MAD_PER_SUBCATEGORY: usize = 3;
 
 /// One detected anomaly. Carries enough context for the report to (a) explain it
 /// in plain language (`reason`) and (b) keep it in sync with the active filter:
@@ -223,6 +234,11 @@ fn mad_zscore_anomalies<'a>(
             Some(m) => m,
             None => continue,
         };
+        // Collect candidates, then keep only the most-extreme few per subcategory.
+        // Over a multi-year history a subcategory can accumulate many >3.5σ rows;
+        // showing them all floods the report. The top handful are the ones worth a
+        // human's attention (cf. the per-category cap on `seasonal_residual`).
+        let mut cand: Vec<(f64, Anomaly)> = Vec::new();
         for c in &rows {
             let mag = c.txn.amount.amount().abs();
             if let Some(z) = mad_zscore(mag, med, mad_val) {
@@ -239,10 +255,13 @@ fn mad_zscore_anomalies<'a>(
                         subcategory,
                         Money::new(med),
                     );
-                    out.push(txn_anomaly("mad_zscore", c, med, format!("{z:.2}"), reason));
+                    cand.push((z, txn_anomaly("mad_zscore", c, med, format!("{z:.2}"), reason)));
                 }
             }
         }
+        cand.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        cand.truncate(MAX_MAD_PER_SUBCATEGORY);
+        out.extend(cand.into_iter().map(|(_, a)| a));
     }
     out
 }
@@ -507,6 +526,20 @@ fn duplicate_charge_anomalies<'a>(
     let mut out = Vec::new();
     for ((merchant, mag), mut rows) in groups {
         if rows.len() < 2 {
+            continue;
+        }
+        // A genuine double-charge is a *meaningful* amount billed twice. Trivial
+        // repeats (a $2.50 coffee, a $9 sandwich bought twice in a day) are normal
+        // life, not errors — skip below a small floor.
+        if mag < dec!(10) {
+            continue;
+        }
+        // If this exact (merchant, amount) recurs many times across the whole
+        // history, that price is *habitual* for the merchant (a fixed-price item, a
+        // standing order) — not a double-charge. A true erroneous double bills an
+        // amount that otherwise appears rarely. Skip habitual price points so daily
+        // same-price purchases don't flood the list.
+        if rows.len() > 3 {
             continue;
         }
         rows.sort_by_key(|c| c.txn.date);

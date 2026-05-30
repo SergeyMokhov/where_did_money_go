@@ -616,16 +616,29 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   // is filtered: a transaction-scoped flag follows its txn's facets; a month/dataset
   // flag follows only category + month range.
   var ANOM = Array.isArray(A.anomalies) ? A.anomalies : [];
-  // Forensic/compliance flags are shown only under the business/public lens.
-  var FORENSIC_METHODS = { structuring:1, round_number:1, benford:1 };
-  function lensShowsForensic(){ return state.lens === "business" || state.lens === "public"; }
+  // The persona lens is a *nested* hierarchy: each level sees everything the
+  // simpler levels see, plus more specialized checks. A method's min level is the
+  // lowest lens at which it appears (unlisted = 0, shown to everyone).
+  //   0 consumer  — fraud + waste + amount outliers (the actionable everyday set)
+  //   1 prosumer  — + time-series analytics (seasonal, regime change)
+  //   2 business  — + expense/cash forensics (Benford, near-threshold structuring)
+  //   3 public    — + round-number payments to individuals (optics/disclosure)
+  var LENS_LEVEL = { consumer:0, prosumer:1, business:2, public:3 };
+  var METHOD_MIN_LEVEL = {
+    seasonal_residual:1, change_point:1,
+    benford:2, structuring:2,
+    round_number:3
+  };
+  function methodLevel(method){ return METHOD_MIN_LEVEL[method] || 0; }
+  function lensLevel(){ return LENS_LEVEL[state.lens] || 0; }
+  function methodVisible(method){ return methodLevel(method) <= lensLevel(); }
   function anomalyMonthInRange(mo){
     if(!(state.monthFrom || state.monthTo)) return true;
     var inM = (!state.monthFrom || mo >= state.monthFrom) && (!state.monthTo || mo <= state.monthTo);
     return state.negMonths ? !inM : inM;
   }
   function anomalyPasses(a){
-    if(FORENSIC_METHODS[a.method] && !lensShowsForensic()) return false;
+    if(!methodVisible(a.method)) return false;
     if(a.category && !facetPass("categories", a.category)) return false;
     if(a.scope === "dataset") return true; // spans the whole selection
     if(a.scope === "month") return anomalyMonthInRange((a.period_or_date || "").slice(0,7));
@@ -863,19 +876,29 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   }
   // Lens selector lives INSIDE this section (it only affects Unusual activity).
   // Built fresh each render; the change handler is re-wired below.
+  // Per-tier flag counts within the *current facet selection*: how many anomalies
+  // first become visible at each lens level. Evaluated with the lens forced to the
+  // widest level so every method passes the lens gate and we can bucket by level.
+  function lensTierCounts(){
+    var saved = state.lens; state.lens = "public";
+    var byLevel = [0, 0, 0, 0];
+    ANOM.forEach(function(a){ if(anomalyPasses(a)) byLevel[methodLevel(a.method)]++; });
+    state.lens = saved;
+    return byLevel;
+  }
   function lensControlHtml(){
     var opts = [["consumer","Consumer"],["prosumer","Prosumer"],["business","Business"],["public","Public"]]
       .map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===state.lens?' selected':'')+'>'+o[1]+'</option>'; }).join("");
-    // How many forensic flags the current (non-forensic) lens is hiding.
-    var savedLens = state.lens; state.lens = "public";
-    var hiddenForensic = ANOM.filter(function(x){ return FORENSIC_METHODS[x.method] && anomalyPasses(x); }).length;
-    state.lens = savedLens;
-    var forensic = (state.lens === "business" || state.lens === "public");
-    var note = forensic
-      ? 'forensic checks included (Benford, near-threshold, round-number)'
-      : (hiddenForensic ? hiddenForensic+' forensic flag'+(hiddenForensic===1?'':'s')+' hidden under this lens — pick Business/Public to show them'
-                        : 'forensic checks (Benford, near-threshold, round-number) appear under Business/Public');
-    return '<div class="lens-bar"><label>Lens <select id="lens-select" title="Persona lens — Business/Public add forensic checks">'+
+    var lvl = lensLevel(), bl = lensTierCounts();
+    var shown = 0; for(var k = 0; k <= lvl; k++) shown += bl[k];
+    // What each higher lens would add, so switching always changes the note.
+    var adds = [];
+    if(lvl < 1 && bl[1]) adds.push("Prosumer +"+bl[1]+" time-series");
+    if(lvl < 2 && bl[2]) adds.push("Business +"+bl[2]+" forensic");
+    if(lvl < 3 && bl[3]) adds.push("Public +"+bl[3]+" round-number");
+    var note = shown + " flag" + (shown === 1 ? "" : "s") + " shown" +
+      (adds.length ? " · " + adds.join(" · ") : (lvl > 0 ? " · widest lens" : ""));
+    return '<div class="lens-bar"><label>Lens <select id="lens-select" title="Persona lens — each step adds more specialized checks">'+
       opts+'</select></label> <span class="muted">'+note+'</span></div>';
   }
   function wireLens(el){

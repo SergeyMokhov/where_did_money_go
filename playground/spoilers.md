@@ -88,13 +88,20 @@ over three years.
   — see *Pets → Pet Supplies & Vet* under **Person = leela**.
 - **Cross-file dedup.** `joint_chequing_recent.csv` overlaps the last two months of
   `joint_chequing.csv`; the **dedup footer** reports the rows collapsed.
-- **Unusual activity battery.** The playground runs with `analysis_profile =
-  "public"` (`config/settings.toml`), so **every** detector is on — including the
-  forensic ones. Look for: a **Benford** flag (the synthetic amounts aren't
-  natural), a **deficit streak** (Bender's 2998 spending run), a **spending shift**
-  (the 2998 rent flip), **season-adjusted** spikes, the two **rare big purchases**
-  (Mars Vegas, the jewellery gift), and a couple of **duplicate charges**. Switch
-  `settings.toml` to `consumer` to hide the forensic flags and see the everyday set.
+- **Unusual activity battery + the persona Lens.** The playground opens at the
+  **Public** lens (`config/settings.toml` `analysis_profile = "public"`), the widest.
+  The **Lens** dropdown *inside the Unusual activity section* switches persona live
+  (no config edit) — it's a **nested** filter, each step adding checks:
+  **Consumer** (fraud + waste + amount outliers) → **Prosumer** (+ time-series:
+  season-adjusted spikes, regime shift) → **Business** (+ Benford) → **Public**
+  (+ round-number payments to individuals). The note next to it tells you how many
+  flags each higher lens would add. In this dataset look for: the two **rare big
+  purchases** (Mars Vegas, the jewellery gift) and a **deficit streak** (Bender's
+  2998 run) — visible to everyone; a **spending shift** (the 2998 rent flip) and
+  **season-adjusted** spikes — Prosumer+; and a **Benford** flag (the synthetic
+  amounts aren't natural) — Business+. (This synthetic data has no near-threshold
+  *structuring* or irregular *round-number* clusters, so Business and Public happen
+  to coincide here — on real data Public adds the round-number-to-individual flags.)
 - **Life-event markers.** `config/events.toml` plants four amber markers on the
   cash-flow chart (crew hired, Mars Vegas getaway, Fry's inheritance, Bender's
   factory job ending). Watch how Bender's marker sits right where his income drops
