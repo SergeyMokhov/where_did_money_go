@@ -29,10 +29,24 @@ pub enum AnalysisProfile {
 
 impl AnalysisProfile {
     /// Whether the forensic/compliance detectors (Benford, structuring,
-    /// round-number-to-individual) should run for this profile.
+    /// round-number-to-individual) are relevant to this profile. The engine now
+    /// computes them regardless (so the report can switch lenses live); this is the
+    /// **default visibility** the report opens with for the configured profile.
     #[must_use]
     pub fn includes_forensic(self) -> bool {
         matches!(self, AnalysisProfile::Business | AnalysisProfile::Public)
+    }
+
+    /// Stable lowercase tag (matches the `settings.toml` value and the report's
+    /// lens selector).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AnalysisProfile::Consumer => "consumer",
+            AnalysisProfile::Prosumer => "prosumer",
+            AnalysisProfile::Business => "business",
+            AnalysisProfile::Public => "public",
+        }
     }
 }
 

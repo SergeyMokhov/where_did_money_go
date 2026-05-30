@@ -423,7 +423,10 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     monthFrom:null, monthTo:null, search:"", searchExclude:"", amtMin:null, amtMax:null,
     // Range negation: when true, the date / amount range is EXCLUDED instead of kept
     // (e.g. drop everything in Dec 2025, or drop every charge between $0 and $20).
-    negMonths:false, negAmt:false
+    negMonths:false, negAmt:false,
+    // Persona lens for the Unusual-activity section; defaults to the configured
+    // profile but is switchable live. Forensic flags show only for business/public.
+    lens: (A.analysis_profile || "consumer")
   };
   // Merchant search/exclude are regexes (case-insensitive). Compiled once per
   // rerender; null when empty or invalid (then we fall back to substring match).
@@ -609,12 +612,16 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   // is filtered: a transaction-scoped flag follows its txn's facets; a month/dataset
   // flag follows only category + month range.
   var ANOM = Array.isArray(A.anomalies) ? A.anomalies : [];
+  // Forensic/compliance flags are shown only under the business/public lens.
+  var FORENSIC_METHODS = { structuring:1, round_number:1, benford:1 };
+  function lensShowsForensic(){ return state.lens === "business" || state.lens === "public"; }
   function anomalyMonthInRange(mo){
     if(!(state.monthFrom || state.monthTo)) return true;
     var inM = (!state.monthFrom || mo >= state.monthFrom) && (!state.monthTo || mo <= state.monthTo);
     return state.negMonths ? !inM : inM;
   }
   function anomalyPasses(a){
+    if(FORENSIC_METHODS[a.method] && !lensShowsForensic()) return false;
     if(a.category && !facetPass("categories", a.category)) return false;
     if(a.scope === "dataset") return true; // spans the whole selection
     if(a.scope === "month") return anomalyMonthInRange((a.period_or_date || "").slice(0,7));
@@ -853,14 +860,26 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   function renderAnomalies(){
     var el = document.getElementById("anomalies-panel");
     var a = detectAnomalies().slice();
-    if(!a.length){ el.innerHTML = '<div class="empty">Nothing unusual in the current selection.</div>'; return; }
+    // How many forensic flags exist but are hidden by the current lens (so the user
+    // knows the Lens selector unlocks more). Counts only those that pass the rest of
+    // the filter, ignoring the lens gate.
+    var savedLens = state.lens; state.lens = "public";
+    var hiddenForensic = lensShowsForensic() ? 0 : ANOM.filter(function(x){
+      return FORENSIC_METHODS[x.method] && anomalyPasses(x); }).length;
+    state.lens = savedLens;
+    var lensNote = '<div class="muted" style="font-size:12px;margin-bottom:8px;">Lens: <b>'+esc(state.lens)+'</b>'+
+      (state.lens === "consumer" || state.lens === "prosumer"
+        ? (hiddenForensic ? ' · '+hiddenForensic+' forensic flag'+(hiddenForensic===1?'':'s')+' hidden — switch to Business/Public to see them'
+                          : ' · forensic checks (Benford, near-threshold, round-number) appear under Business/Public')
+        : ' · forensic checks included')+'</div>';
+    if(!a.length){ el.innerHTML = lensNote + '<div class="empty">Nothing unusual in the current selection.</div>'; return; }
     // Most serious first, then biggest amount.
     a.sort(function(x, y){
       var rx = SEV_RANK[sevClass(x)], ry = SEV_RANK[sevClass(y)];
       if(rx !== ry) return rx - ry;
       return Math.abs(toCents(y.amount)) - Math.abs(toCents(x.amount));
     });
-    el.innerHTML = '<table><thead><tr><th>When/where</th><th>Why</th><th class="num">Amount</th><th>Method</th></tr></thead><tbody>'+
+    el.innerHTML = lensNote + '<table><thead><tr><th>When/where</th><th>Why</th><th class="num">Amount</th><th>Method</th></tr></thead><tbody>'+
       a.map(function(x){
         var when = esc(x.period_or_date) + (x.merchant ? ' · <span class="muted">'+esc(x.merchant)+'</span>' : "");
         var amt = (x.method === "benford") ? '<span class="muted">—</span>' : fmtMoney(toCents(x.amount));
@@ -1405,6 +1424,20 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       }, 200);
     });
     bar.appendChild(searchEx);
+
+    // Persona lens: switches which "Unusual activity" detectors are shown. The
+    // forensic ones (Benford / near-threshold / round-number) appear under
+    // business & public. Defaults to the configured profile; switchable live.
+    var lensLabel = document.createElement("span"); lensLabel.className = "fb-label";
+    lensLabel.style.textTransform = "none"; lensLabel.style.letterSpacing = "0"; lensLabel.textContent = "Lens ";
+    var lensSel = document.createElement("select"); lensSel.id = "lens-select";
+    lensSel.title = "Persona lens for Unusual activity — business/public add forensic checks";
+    [["consumer","Consumer"],["prosumer","Prosumer"],["business","Business"],["public","Public"]].forEach(function(o){
+      var op = document.createElement("option"); op.value = o[0]; op.textContent = o[1]; lensSel.appendChild(op); });
+    lensSel.value = state.lens;
+    lensSel.addEventListener("change", function(){ state.lens = lensSel.value; renderAnomalies(); });
+    lensLabel.appendChild(lensSel);
+    bar.appendChild(lensLabel);
 
     var reset = document.createElement("button"); reset.type = "button"; reset.className = "btn"; reset.textContent = "Reset";
     reset.addEventListener("click", function(){

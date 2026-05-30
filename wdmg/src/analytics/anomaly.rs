@@ -152,12 +152,11 @@ pub fn detect(
     out.extend(subscription_price_increase_anomalies(items));
     // Tier 2: card-testing is a universal fraud signal.
     out.extend(card_testing_anomalies(items, recurring_merchants));
-    // Tier 2 forensic/compliance — business & public profiles only.
-    if settings.profile.includes_forensic() {
-        out.extend(structuring_anomalies(items, settings.structuring_threshold));
-        out.extend(round_number_transfer_anomalies(items, recurring_merchants));
-        out.extend(benford_anomalies(items));
-    }
+    // Tier 2 forensic/compliance. Always computed so the report can switch lenses
+    // live; the report hides these unless the active lens is business/public.
+    out.extend(structuring_anomalies(items, settings.structuring_threshold));
+    out.extend(round_number_transfer_anomalies(items, recurring_merchants));
+    out.extend(benford_anomalies(items));
     // Tier 3: time-series structure.
     out.extend(change_point_anomalies(items));
     out.extend(seasonal_residual_anomalies(items, recurring_merchants));
@@ -1241,14 +1240,6 @@ mod tests {
         AnalysisSettings::default()
     }
 
-    /// Public-profile settings (all detectors on) for forensic tests.
-    fn settings_public() -> AnalysisSettings {
-        AnalysisSettings {
-            profile: crate::config::AnalysisProfile::Public,
-            structuring_threshold: dec!(10000),
-        }
-    }
-
     /// Build a transfer transaction (for structuring / round-number tests).
     fn transfer(merchant: &str, amount: &str, d: Date) -> (Transaction, Assignment) {
         let (mut t, mut a) = spend_full("Transfers", "Move", merchant, amount, d);
@@ -1522,28 +1513,22 @@ mod tests {
     }
 
     #[test]
-    fn structuring_only_for_forensic_profile_and_needs_a_cluster() {
+    fn structuring_needs_a_cluster() {
+        // The engine always computes forensic detectors (the report gates the
+        // *display* by lens); a near-threshold cluster of ≥2 is flagged.
         let pairs = vec![
             transfer("WIRE", "-9500.00", date(2026, 1, 5)),
             transfer("WIRE", "-9600.00", date(2026, 1, 20)),
         ];
-        // Consumer profile: forensic detectors off.
-        assert!(
-            !detect(&view(&pairs), &no_recurring(), &settings())
-                .iter()
-                .any(|x| x.method == "structuring"),
-            "consumer profile must not run structuring"
-        );
-        // Public profile: the near-threshold cluster is flagged.
-        let a = detect(&view(&pairs), &no_recurring(), &settings_public());
+        let a = detect(&view(&pairs), &no_recurring(), &settings());
         assert!(
             a.iter().filter(|x| x.method == "structuring").count() >= 2,
-            "public profile flags the near-threshold cluster, got: {a:?}"
+            "a near-threshold cluster should be flagged, got: {a:?}"
         );
         // A single near-threshold transfer is NOT structuring.
         let lone = vec![transfer("WIRE", "-9500.00", date(2026, 1, 5))];
         assert!(
-            !detect(&view(&lone), &no_recurring(), &settings_public())
+            !detect(&view(&lone), &no_recurring(), &settings())
                 .iter()
                 .any(|x| x.method == "structuring"),
             "a lone near-threshold txn is not structuring"

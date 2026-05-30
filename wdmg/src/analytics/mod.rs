@@ -112,6 +112,9 @@ pub struct Analytics {
     pub period: Period,
     /// Single currency of all inputs.
     pub currency: String,
+    /// The configured persona profile — the **default lens** the report opens with
+    /// (the report can switch lenses live; all detectors are always computed).
+    pub analysis_profile: String,
     /// Flow totals and series.
     #[serde(flatten)]
     pub flows: flows::Flows,
@@ -228,6 +231,7 @@ pub fn compute(
     Analytics {
         period,
         currency: currency.to_string(),
+        analysis_profile: settings.profile.as_str().to_string(),
         flows,
         spend_by_category,
         income_by_source,
