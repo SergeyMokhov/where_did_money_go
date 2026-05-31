@@ -13,6 +13,9 @@ report.html
 
 # Playground: the demo data is committed (generate once, use forever — it's
 # seeded/deterministic). Only the per-run analysis artifacts below stay ignored.
+# The playground's curated insights ARE source (they power the live demo report),
+# so keep them tracked even though they share the ignored "insights.json" name.
+!playground/config/insights.json
 
 # Local-only convenience scripts (reference private paths — never commit)
 *.local.sh

@@ -1,0 +1,55 @@
+{
+  "summary": "Across three years (2997–2999) the household took in $453,238.77 and spent $551,246.00, ending roughly $98,007 in the red — a savings rate of about -22%. That headline is misleading, though: two of the three members run healthy surpluses (Fry +$111,880, Leela +$44,735), and the entire deficit traces to one person. Bender earned well — two salaries totalling $158,400 — yet spent $413,022 and finished about $254,622 underwater. The cause is concentrated and escalating gambling, with booze, cigars, and an unpaid credit card amplifying it. Fixing the casino habit alone would flip the household from deeply negative to clearly positive.",
+  "recommendations": [
+    {
+      "title": "Stop the gambling — it is the whole deficit",
+      "detail": "Casino merchants dominate everything else: Lucky 7 Slots ($104,224), Robo Bet Palace ($78,274), Lunar Vegas Casino ($75,873 plus $35,473 in cash advances), and Blackjack Palace ($59,444). Together that is roughly $353,000 — more than Bender's entire $158,400 income over the same period, and it is trending up 114% year over year. No other change comes close; this single behaviour is the difference between a household that loses $98k and one that saves comfortably.",
+      "est_monthly_savings": "9813.00"
+    },
+    {
+      "title": "Pay off the Mastercard and stop the casino cash advances",
+      "detail": "Bender's Mastercard accumulates booze, cigars, and 'Lunar Vegas Casino Cash Advance' charges ($35,473 across 36 advances) but shows no 'PAYMENT — THANK YOU' anywhere, unlike Fry's card, which is cleared monthly. A revolving balance fed by cash advances is the most expensive money there is; pay it to zero and route gambling spend nowhere near it."
+    },
+    {
+      "title": "Cancel the forgotten subscriptions",
+      "detail": "Two recurring charges are pure leakage: the Jog-O-Tron Gym at $44.99/mo (used twice in 16 months) and the Lobrau Platinum 'booze-of-the-month' club at $89.99/mo. Both surface in Recurring & subscriptions; cancelling them is a no-regret $134.98/mo.",
+      "est_monthly_savings": "134.98"
+    },
+    {
+      "title": "Reclaim the shuttle fuel as a business expense",
+      "detail": "Dark Matter Fuel Depot bills a steady $1,200/mo ($43,200 over three years) — that is the Planet Express delivery shuttle Leela captains, not a personal cost. If it is reimbursable, claiming it moves $1,200/mo off the household books entirely.",
+      "est_monthly_savings": "1200.00"
+    },
+    {
+      "title": "Put the savers' surplus to work",
+      "detail": "Fry and Leela together net about $156,600 over the period and already save steadily. Note Fry's income includes a one-time $50,000 inheritance (Estate of Yancy Fry Sr, June 2999) — that is non-recurring, so size ongoing savings off the salary line, not the spike. Sweep the recurring surplus into savings or investments rather than letting it sit in chequing."
+    }
+  ],
+  "anomaly_notes": [
+    {
+      "ref": "Cash-flow runway 2998-01…2998-08",
+      "note": "The eight-month deficit streak is not a one-off shock — it is the gambling peak landing just as Bender's IRONWORKS factory salary ends mid-2998. Income fell while casino spend rose; the two together drained the runway."
+    },
+    {
+      "ref": "Indulgence → Travel 2998-08-12 ($5,500)",
+      "note": "The Mars Vegas Resort trip is a genuine one-time splurge, not a recurring pattern — fine to leave as-is, just don't repeat it during a deficit stretch."
+    },
+    {
+      "ref": "Indulgence → Gifts & Jewellery 2999-02-14 ($3,000)",
+      "note": "The Wong Industries Jewellers charge is a Valentine's gift for Leela — explainable and one-off. Flagged only because it is large and rare, not because it is a problem."
+    },
+    {
+      "ref": "Pets → Pet Supplies & Vet (recurring ~$248)",
+      "note": "Repeated Interspecies Vet Clinic visits (~$248, about 12× the usual pet line) are Nibbler's ongoing care, not an error — a real, expected cost worth budgeting for rather than treating as an anomaly each month."
+    },
+    {
+      "ref": "Benford (whole dataset)",
+      "note": "The leading-digit flag is expected here because the sample data is synthetic. On real statements, a Benford deviation this strong would instead suggest manually entered or fabricated amounts worth a closer look."
+    }
+  ],
+  "trend_notes": [
+    "Indulgence spending is up 113.6% year over year — the gambling is escalating, not plateauing, which is what makes it the priority.",
+    "The household deficit is a one-person story: two of three members run a surplus, so this is a behaviour problem, not an income problem.",
+    "Self-care and Pets show rising percentages but on tiny absolute dollars; they are noise next to the casino line and not worth acting on."
+  ]
+}
