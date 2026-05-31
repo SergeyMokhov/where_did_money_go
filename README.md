@@ -7,6 +7,10 @@ answering: *where did the money come from, where did it go, and how can I save?*
 It ships as a [Claude Code](https://claude.com/claude-code) **skill**, but the engine is a
 plain Rust CLI (`wdmg`) you can also run on its own.
 
+**▶ [Live demo](https://sergeymokhov.github.io/where_did_money_go/)** — the full interactive
+report rendered from the bundled sample data. No install, no sign-up; it opens in your
+browser and contacts no network.
+
 > The shipped example configuration is themed (Planet Express, New New York, …). It is a
 > **template** — replace it with your own. Your real, private config should live **outside
 > this repo** (see [Privacy](#privacy)).

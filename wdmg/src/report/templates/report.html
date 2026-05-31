@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Your Financial Dashboard</title>
+<title>Where Did Money Go? Your Financial Dashboard</title>
 <style>{{ uplot_css|safe }}</style>
 <style>
 :root{
@@ -176,7 +176,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
 
   <header class="top">
     <div>
-      <h1>Your Financial Dashboard</h1>
+      <h1>Where Did Money Go? Your Financial Dashboard</h1>
       <div class="sub">
         <span id="period-sub">
           {% if let Some(s) = analysis.analytics.period.start %}{{ s }}{% endif %}
@@ -251,7 +251,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
   <div class="panel" id="recurring-panel"></div>
 
   <!-- Anomalies -->
-  <h2 class="sec-h">Unusual activity <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="A battery of robust, explainable checks: outlier amounts, an expensive month, a rare big-ticket purchase, duplicate charges, an unfamiliar new large payee, subscription price hikes, card-testing bursts, season-adjusted spikes, sustained spending shifts and deficit streaks — plus (for the business/public profile) Benford's-law, near-threshold and round-number checks. The 'Why' column explains each flag; rows are sorted most-serious first and follow the filter bar. A flag isn't always a problem — just worth a look.">i</span></h2>
+  <h2 class="sec-h">Unusual Activity and Warnings <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="A battery of robust, explainable checks: outlier amounts, an expensive month, a rare big-ticket purchase, duplicate charges, an unfamiliar new large payee, subscription price hikes, card-testing bursts, season-adjusted spikes, sustained spending shifts and deficit streaks — plus (for the business/public profile) Benford's-law, near-threshold and round-number checks. The 'Why' column explains each flag; rows are sorted most-serious first and follow the filter bar. A flag isn't always a problem — just worth a look.">i</span></h2>
   <div class="panel" id="anomalies-panel"></div>
 
   <!-- Trends: spending (out) and income (in) as separate sections -->
@@ -511,6 +511,17 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     return true;
   }
   function facetActive(key){ var f = state[key]; return f.inc.size > 0 || f.exc.size > 0; }
+  // An include-set that already covers every known value of a facet (and excludes
+  // nothing) does not actually narrow the view — selecting "all persons" is the
+  // same as selecting none. Used only for aggregate-anomaly relevance, so a whole-
+  // dataset flag (cash-flow runway, Benford, a total-spend shift) stays visible
+  // when the selection is effectively the entire dataset.
+  function facetNarrows(key){
+    var f = state[key];
+    if(f.exc.size > 0) return true;
+    if(f.inc.size === 0) return false;
+    return f.inc.size < FACETS[key].length;
+  }
 
   function passes(t){
     if(!facetPass("persons", t.person))           return false;
@@ -710,8 +721,8 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     var rows = lastRows || [], present = Object.create(null);
     for(var i = 0; i < rows.length; i++){ present[rows[i].category + "|" + rows[i].month] = 1; }
     ANOM_CTX.present = present;
-    ANOM_CTX.narrowed = facetActive("persons") || facetActive("accounts") ||
-      facetActive("subcategories") || facetActive("categories") || facetActive("kinds") ||
+    ANOM_CTX.narrowed = facetNarrows("persons") || facetNarrows("accounts") ||
+      facetNarrows("subcategories") || facetNarrows("categories") || facetNarrows("kinds") ||
       !!state.search || !!state.searchExclude ||
       state.amtMin != null || state.amtMax != null ||
       !!state.monthFrom || !!state.monthTo;
