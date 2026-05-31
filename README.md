@@ -9,7 +9,10 @@ plain Rust CLI (`wdmg`) you can also run on its own.
 
 **▶ [Live demo](https://sergeymokhov.github.io/where_did_money_go/)** — the full interactive
 report rendered from the bundled sample data. No install, no sign-up; it opens in your
-browser and contacts no network.
+browser and contacts no network. The sample household (the *Futurama* crew, year 2999) keeps
+a few secrets buried in the numbers — slice by person, search the merchants, and follow the
+ⓘ hints to see if you can work out *where Bender's money really went* before the report spells
+it out.
 
 > The shipped example configuration is themed (Planet Express, New New York, …). It is a
 > **template** — replace it with your own. Your real, private config should live **outside
