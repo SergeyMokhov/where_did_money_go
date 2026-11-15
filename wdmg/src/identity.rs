@@ -133,6 +133,27 @@ fn matcher_applies(
     true
 }
 
+/// Every account whose criteria hold for `txn`, in declaration order. The first
+/// one is what [`resolve`] assigns; any others are shadowed by it (diagnostics
+/// for config editors: "these rows also fit account X").
+#[must_use]
+pub fn matching_accounts<'c>(config: &'c Config, txn: &Transaction) -> Vec<&'c str> {
+    let last4 = captured_last4(config, txn);
+    config
+        .account_matchers
+        .iter()
+        .filter(|m| matcher_applies(m, txn, last4.as_deref()))
+        .map(|m| m.account.id.as_str())
+        .collect()
+}
+
+/// The id the transaction's profile captures from its file name
+/// (`account.id_from_filename`, typically a card's last 4 digits).
+#[must_use]
+pub fn filename_id(config: &Config, txn: &Transaction) -> Option<String> {
+    captured_last4(config, txn)
+}
+
 /// Resolve `owner_person` and `account_id` on every transaction in place.
 ///
 /// Returns the [`Roster`] of declared people/accounts for downstream phases.

@@ -100,10 +100,79 @@ const noPick = !(await page.$eval('#txwin .tw-chip', () => true).catch(() => fal
 step(Math.abs(moved.x - (nb.x - 150)) < 3 && Math.abs(moved.y - (nb.y + 120)) < 3 && d0 !== d1 && noPick && await visible('.flow-reset'),
   'transfer-graph dots drag (ribbons follow, no accidental pick)', JSON.stringify({ from: nb, to: moved, ribbonsMoved: d0 !== d1, noPick, reset: await visible('.flow-reset') }));
 await page.$eval('.flow-reset', (b) => b.click());
+// Every account is on the circle (even with no transfers); unresolved legs are dashed.
+const circ = await page.evaluate(() => ({
+  names: [...document.querySelectorAll('#flow-graph .node-lbl')].map((t) => t.textContent),
+  inferred: document.querySelectorAll('#flow-graph .edge-g.inferred').length,
+}));
+step(circ.names.includes('Bender Mastercard') && circ.names.includes('BIG BERTHA BOT') && circ.inferred > 0,
+  'transfer circle shows lone accounts and inferred parties', JSON.stringify(circ));
+// Click a name → focus view; drill category → subcategory → merchants; follow a party; back.
+// A REAL mouse click on the name (press → release): a synthetic click on the text
+// skips the dot's pointer capture and once hid a bug where the name only picked.
+const label = async (txt) => {
+  if (!(await page.$eval('#txwin', (w) => w.hidden))) { await page.$eval('#txwin .fw-min', (b) => b.click()); await sleep(600); }
+  const pt = await page.$$eval('#flow-graph .node-lbl', (ts, txt) => {
+    const t = ts.find((x) => x.textContent === txt); t.scrollIntoView({ block: 'center' });
+    const r = t.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    return { x, y, hit: document.elementFromPoint(x, y) === t };
+  }, txt);
+  if (!pt.hit) throw new Error(`name "${txt}" is covered at its position`);
+  await page.mouse.click(pt.x, pt.y);
+};
+
+const fnode = (pre) => page.$$eval('.focus-svg .fnode', (gs, pre) => {
+  const g = gs.find((x) => x.querySelector('.fn-lbl').textContent.startsWith(pre));
+  g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  return /: ([\d,.]+) ·/.exec(g.querySelector('title').textContent)[1];
+}, pre);
+const crumbs = () => page.$eval('#flow-crumbs', (c) => c.textContent.replace(/\s+/g, ' ').trim());
+const selBefore = await page.$eval('#txwin .tw-chip', (c) => c.textContent).catch(() => null);
+await label('Bender Ledger'); await sleep(200);
+const c1 = await crumbs();
+const selAfter = await page.$eval('#txwin .tw-chip', (c) => c.textContent).catch(() => null);
+step(/› Bender Ledger/.test(c1) && selAfter === selBefore, 'clicking a NAME (real mouse) opens explore, not the transaction list', JSON.stringify({ c1, selBefore, selAfter }));
+const txState = () => page.$eval('#txwin', (w) => ({ hidden: w.hidden, out: w.querySelector('.tw-out')?.textContent,
+  chip: w.querySelector('.tw-chip')?.textContent ?? null, pulse: document.getElementById('txwin-dock').classList.contains('pulse') }));
+const indul = await fnode('Indulgence'); await sleep(200);
+const w0 = await txState();
+step(/› Indulgence/.test(await crumbs()) && w0.hidden && w0.chip === selBefore,
+  'drilling into a category leaves the Transactions window alone', JSON.stringify(w0));
+// A ribbon is a quiet pick: the minimized window stays minimized, its dock button pulses.
+await page.$eval('.focus-svg .fband[data-qpick$="|R|cat|Indulgence"]', (g) => g.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+await sleep(150);
+const w1 = await txState();
+step(w1.hidden && w1.pulse && w1.out === indul && /Indulgence/.test(w1.chip), 'ribbon picks exactly its transactions without popping the window up', JSON.stringify({ indul, w1 }));
+// "≡ N transactions" opens the window on the breadcrumb's level.
+await page.$eval('.fc-list', (b) => b.click()); await sleep(600);
+const w1b = await txState();
+step(!w1b.hidden && /Indulgence/.test(w1b.chip) && /≡ \d+ transactions?/.test(await crumbs()), 'breadcrumb button opens the window on that level', JSON.stringify(w1b));
+await page.$eval('#txwin .fw-min', (b) => b.click()); await sleep(600);
+await fnode('Lottery'); await sleep(200);
+const mers = await page.$$eval('.focus-svg .fn-mer', (g) => g.length);
+const c2 = await crumbs();
+step(mers > 0 && /Indulgence › Lottery & Gaming/.test(c2), 'drill: subcategory shows its merchants', JSON.stringify({ mers, c2 }));
+const merName = await page.$eval('.focus-svg .fn-mer', (g) => { g.dispatchEvent(new MouseEvent('click', { bubbles: true })); return g.querySelector('title').textContent.split(':')[0]; });
+await sleep(150);
+const w2 = await txState();
+step(w2.hidden && w2.chip && w2.chip.includes(merName), 'a merchant (leaf) box picks its transactions quietly', JSON.stringify({ merName, w2 }));
+await fnode('BIG BERTHA'); await sleep(200);
+const c3 = await crumbs();
+await page.$eval('.fc-back', (b) => b.click()); await sleep(200);
+const c4 = await crumbs();
+step(/BIG BERTHA BOT/.test(c3) && /Back/.test(c3) && /› Bender Ledger/.test(c4), 'follow a party, then Back', JSON.stringify({ c3, c4 }));
+await page.$eval('.fc-crumb[data-lvl="all"]', (a) => a.click()); await sleep(200);
+await label('Bender Mastercard'); await sleep(200);
+const card = await page.evaluate(() => ({ none: [...document.querySelectorAll('.focus-svg .fc-none')].map((t) => t.textContent),
+  out: [...document.querySelectorAll('.focus-svg .fn-cat .fn-lbl')].map((t) => t.textContent) }));
+step(card.none.includes('nothing in') && card.out.length > 0, 'an account with no transfers still opens (money out only)', JSON.stringify(card));
+await page.$eval('.fc-crumb[data-lvl="all"]', (a) => a.click()); await sleep(200);
+await page.$eval('#txwin .tw-x', (b) => b.click()).catch(() => {});
 await page.$eval('#transfers-panel', (e) => e.scrollIntoView({ block: 'start' })); await sleep(100);
 await shot('01e-flow');
 
 // Minimize (animated into the dock) and restore.
+if (await page.$eval('#txwin', (w) => w.hidden)) { await page.$eval('#txwin-dock', (b) => b.click()); await sleep(600); }
 await page.click('#txwin .fw-min');
 await sleep(700);
 step(!(await winOpen()), 'minimize hides the window into the dock', 'hidden');
@@ -334,11 +403,99 @@ step(p2.includes('2026-03-31|0.07|INTEREST CREDIT INTEREST AMOUNT 0.07|income') 
 await clickText('.map-actions button', 'Save format');
 await page.waitForFunction(() => /✓ some_bank_debit · 2 rows/.test(document.body.textContent), { timeout: 10000 });
 step(true, 'multi-description format saved and recognised', 'some_bank_debit · 2 rows');
+// People & accounts: files on no account get one; renames and owner moves are
+// saved into people.toml with its comments intact.
+const orphanWarn = await page.$eval('.cfg-right', (r) => /belong to no account/.test(r.textContent));
+await clickText('.cfg-h3-btns button', 'People & accounts');
+await page.waitForSelector('.pe-box');
+const orphanFiles = await page.$$eval('.pe-orphan', (o) => o.map((x) => x.dataset.file));
+await page.$eval('.pe-orphan[data-file="odd_bank_4321.csv"]', (row) => {
+  const name = row.querySelector('.pe-newbits input'); name.value = 'Kid savings';
+  const own = row.querySelectorAll('.pe-newbits select')[0]; own.value = 'leela';
+  row.querySelector('button').click();
+});
+// The guide proposes a rule from the ticked file and previews it with the engine.
+await page.waitForSelector('.mg-box');
+const kidGuide = await page.evaluate(() => ({
+  verdict: document.querySelector('.mg-verdict').textContent,
+  ticked: [...document.querySelectorAll('.mg-files tr.on')].map((r) => r.dataset.file),
+  crit: document.querySelector('.mg-crit').textContent,
+}));
+// The mapped format reads "4321" from the file name, so the number is the durable choice.
+step(/Picks up exactly the 1 ticked file/.test(kidGuide.verdict) && kidGuide.ticked.join() === 'odd_bank_4321.csv' && /carries the number 4321/.test(kidGuide.crit),
+  'picks-up guide: proposes a rule for the ticked file and previews it', JSON.stringify(kidGuide));
+await shot('people-guide');
+await clickText('.mg-box .map-actions button', 'Apply');
+await page.waitForFunction(() => document.querySelector('tr[data-account="Kid savings"]') && !document.querySelector('.mg-box'));
+const kidRows = await page.$eval('tr[data-account="Kid savings"] td.num', (td) => td.textContent);
+const kidHow = await page.$eval('tr[data-account="Kid savings"] .pe-how', (td) => td.textContent);
+// An external account can be given statements: savings_export.csv → TFSA.
+const extOrphan = await page.$$eval('.pe-orphan', (o) => o.map((x) => x.dataset.file).find((f) => /savings_export/.test(f)));
+await page.$eval(`.pe-orphan[data-file="${extOrphan}"]`, (row) => {
+  const t = row.querySelector('select'); t.value = 'TFSA'; t.dispatchEvent(new Event('change'));
+  [...row.querySelectorAll('button')].find((b) => /Assign/.test(b.textContent)).click();
+});
+await page.waitForSelector('.mg-box');
+await clickText('.mg-box .map-actions button', 'Apply');
+await page.waitForFunction(() => !document.querySelector('.mg-box'));
+const tfsa = await page.$eval('tr[data-account="TFSA"]', (tr) => ({ rows: tr.querySelector('td.num').textContent, how: tr.querySelector('.pe-how').textContent }));
+step(/^[1-9]/.test(tfsa.rows) && !/external/.test(tfsa.how), 'an external account given a statement becomes a regular one', JSON.stringify(tfsa));
+// Kind is editable; a narrowed rule that misses its file shows in the health check.
+await page.$eval('tr[data-account="Kid savings"] td:nth-child(2) select', (s) => { s.value = 'debit'; s.dispatchEvent(new Event('change')); });
+await page.waitForFunction(() => document.querySelector('tr[data-account="Kid savings"] td:nth-child(2) select').value === 'debit');
+await page.$eval('tr[data-account="Kid savings"] .pe-how-btn', (b) => b.click());
+await page.waitForSelector('.mg-box');
+await page.$$eval('.mg-row', (rows) => {
+  const r = rows.find((x) => /File name/.test(x.textContent));
+  const cb = r.querySelector('input[type=checkbox]'); cb.checked = true; cb.dispatchEvent(new Event('change'));
+});
+await page.$eval('.mg-name', (i) => { i.value = 'nope_'; i.dispatchEvent(new Event('input')); });
+await page.waitForFunction(() => /not picked up/.test(document.querySelector('.mg-verdict').textContent), { timeout: 5000 });
+await clickText('.mg-box .map-actions button', 'Apply');
+await page.waitForFunction(() => !document.querySelector('.mg-box'));
+const health = await page.$$eval('.pe-hi', (hs) => hs.map((x) => x.className + ':' + x.textContent));
+step(health.some((x) => /info/.test(x) && /pick up none of this project’s statements/.test(x) && /Kid savings/.test(x)) && health.some((x) => /bad/.test(x) && /no account/.test(x)),
+  'health check flags an account that picks up nothing and files on no account', JSON.stringify(health));
+await page.$eval('.pe-health', (e) => e.scrollIntoView()); await shot('people-health');
+await clickText('.pe-box .map-actions button', '↶ Undo');
+await page.waitForFunction(() => ![...document.querySelectorAll('.pe-hi.info button')].some((b) => b.textContent === 'Kid savings'));
+await page.$eval('[data-person="fry"] .pe-person-name', (i) => { i.value = 'Philip'; i.dispatchEvent(new Event('change')); });
+await page.waitForFunction(() => document.querySelector('[data-person="Philip"]'));
+await page.$eval('tr[data-account="Joint Savings"] td:nth-child(5) select', (s) => { s.value = 'leela'; s.dispatchEvent(new Event('change')); });
+await page.waitForFunction(() => document.querySelector('[data-person="leela"] tr[data-account="Joint Savings"]'));
+step(orphanWarn && orphanFiles.includes('odd_bank_4321.csv') && kidRows === '3' && /number 4321 in the file name/.test(kidHow),
+  'people editor: assign a file to a new account, rename a person, move an account', JSON.stringify({ orphanFiles, kidRows, kidHow }));
+// Delete: a person with accounts can't go until they're gone; then they can.
+const delBlocked = await page.$eval('[data-person="bender"] .pe-person-head .pe-del', (b) => b.disabled);
+for (const a of ['Bender Mastercard', 'Bender Ledger']) {
+  await page.$eval(`tr[data-account="${a}"] .pe-del`, (b) => b.click());
+  await page.waitForFunction((a) => !document.querySelector(`tr[data-account="${a}"]`), {}, a);
+}
+await page.$eval('[data-person="bender"] .pe-person-head .pe-del', (b) => b.click());
+await page.waitForFunction(() => !document.querySelector('[data-person="bender"]'));
+step(delBlocked, 'delete accounts, then their emptied person', 'bender gone');
+await clickText('.map-actions button', 'Save');
+await page.waitForFunction(() => !document.querySelector('.pe-box'));
+const ppl = await page.evaluate(() => new Promise((res) => {
+  const rq = indexedDB.open('wdmg-projects');
+  rq.onsuccess = () => {
+    const all = rq.result.transaction('projects').objectStore('projects').getAll();
+    all.onsuccess = () => {
+      const f = all.result.find((d) => d.name === 'E2E household')?.files.find((x) => x.name === 'people.toml');
+      res(f ? new TextDecoder().decode(f.bytes) : '');
+    };
+  };
+}));
+step(/PLAYGROUND household/.test(ppl) && /id = "Kid savings"/.test(ppl) && /id = "Philip"/.test(ppl) && /card_last4 = "4321"/.test(ppl) && !/id = "TFSA"\s*\n\s*external/.test(ppl) && !/bender/i.test(ppl.replace(/^\s*#.*$/gm, '')),
+  'people.toml keeps its comments and holds the edits (part of the config bundle)', ppl.split('\n').filter((l) => /Kid savings|Philip|odd_bank|4321|TFSA/.test(l)).join(' / '));
 await clickText('.cfg-actions button', 'Open in report');
 await page.waitForFunction(() => !document.getElementById('report-root').hidden && /E2E/.test(document.getElementById('proj-name').textContent), { timeout: 30000 });
 const txRows = await page.$$eval('#txwin .fw-body tbody tr', (r) => r.length);
 step(txRows > 0, 'new project analyzed in-browser', `txn rows shown=${txRows}`);
 await shot('05-new-project');
+const accts = await page.$$eval('#by-account-panel tbody td:first-child', (t) => t.map((x) => x.textContent));
+const persons = await page.$$eval('#by-person-panel tbody td:first-child', (t) => t.map((x) => x.textContent));
+step(accts.includes('Kid savings') && persons.includes('Philip') && !persons.includes('fry'), 'report uses the new names', JSON.stringify({ accts, persons }));
 
 // 4. Delete it; app falls back to the demo.
 await page.click('#config-open');
@@ -350,6 +507,20 @@ await page.click('#config-close');
 await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
 const back = await page.$eval('#proj-name', (e) => e.textContent);
 step(/Demo/.test(back), 'deleting the active project falls back to the demo', back);
+
+// Explore view → ✎ Rename: the account is renamed in the demo's people.toml and the report re-analyzes.
+await page.$eval('#transfers-panel', (e) => { e.classList.remove('sec-closed'); window.dispatchEvent(new Event('resize')); });
+await sleep(300);
+await page.$$eval('#flow-graph .node-lbl', (ts) => ts.find((x) => x.textContent === 'Bender Ledger').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+await page.waitForSelector('.fc-edit');
+await page.$eval('.fc-edit', (b) => b.click());
+await page.waitForSelector('.pe-box tr.pe-focus[data-account="Bender Ledger"]');
+await page.$eval('tr[data-account="Bender Ledger"] input', (i) => { i.value = 'Bender Main'; i.dispatchEvent(new Event('change')); });
+await page.waitForFunction(() => document.querySelector('tr[data-account="Bender Main"]'));
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), clickText('.map-actions button', 'Save')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+const renamed = await page.$$eval('#by-account-panel tbody td:first-child', (t) => t.map((x) => x.textContent));
+step(renamed.includes('Bender Main') && !renamed.includes('Bender Ledger'), 'rename from the explore view re-analyzes the report', JSON.stringify(renamed));
 
 } catch (e) {
   failed++;

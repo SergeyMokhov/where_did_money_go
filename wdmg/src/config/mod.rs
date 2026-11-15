@@ -12,6 +12,7 @@
 pub mod categories;
 pub mod events;
 pub mod people;
+pub mod people_edit;
 pub mod profiles;
 pub mod settings;
 

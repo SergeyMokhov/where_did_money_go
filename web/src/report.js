@@ -586,25 +586,34 @@ export function runReport(DATA, OPTS){
     PICKS[key] = {key:key, label:label, test:test};
     return ' data-pick="'+esc(key)+'" tabindex="0" role="button" title="Show these transactions"';
   }
+  // `data-qpick` is a quiet pick (the explore view): it updates the window, but
+  // a minimized window stays minimized — its dock button pulses with the count.
   function markPicked(){
-    document.querySelectorAll("[data-pick]").forEach(function(el){
-      el.classList.toggle("picked", !!SEL && el.getAttribute("data-pick") === SEL.key);
+    document.querySelectorAll("[data-pick],[data-qpick]").forEach(function(el){
+      var k = el.getAttribute("data-pick") || el.getAttribute("data-qpick");
+      el.classList.toggle("picked", !!SEL && k === SEL.key);
     });
   }
-  function selectTx(sel){
+  function selectTx(sel, quiet){
     SEL = (sel && SEL && SEL.key === sel.key) ? null : sel;
     renderTxWin(); markPicked();
-    if(SEL) TXWIN.open();
+    if(!SEL) return;
+    if(quiet && TXWIN.isMinimized()){
+      var b = TXWIN.dockBtn;
+      b.classList.remove("pulse"); void b.offsetWidth; b.classList.add("pulse");
+      clearTimeout(b._pulseT); b._pulseT = setTimeout(function(){ b.classList.remove("pulse"); }, 2000);
+    } else TXWIN.open();
   }
   function onPickEvent(ev){
-    var el = ev.target.closest && ev.target.closest("[data-pick]");
+    var el = ev.target.closest && ev.target.closest("[data-pick],[data-qpick]");
     if(!el) return;
-    var p = PICKS[el.getAttribute("data-pick")];
-    if(p) selectTx(p);
+    var quiet = !el.hasAttribute("data-pick");
+    var p = PICKS[el.getAttribute(quiet ? "data-qpick" : "data-pick")];
+    if(p) selectTx(p, quiet);
   }
   document.addEventListener("click", onPickEvent);
   document.addEventListener("keydown", function(ev){
-    if((ev.key === "Enter" || ev.key === " ") && ev.target.matches && ev.target.matches("[data-pick]")){
+    if((ev.key === "Enter" || ev.key === " ") && ev.target.matches && ev.target.matches("[data-pick],[data-qpick]")){
       ev.preventDefault(); onPickEvent(ev);
     }
   });
@@ -910,21 +919,52 @@ export function runReport(DATA, OPTS){
     renderTrendTable("trends-in-panel",  rows, "income", "subcategory", "Source",   true,  cut);
   }
 
+  // ---------- money between accounts: who each transfer leg went to / came from ----------
+  // A leg is one transfer row, keyed by account, date and SIGNED cents (a −383.29
+  // to one person and a +383.29 from another on the same day are different legs).
+  // Matched pairs and rule-assigned (external) legs know their counterparty; any
+  // other leg is "inferred": the e-transfer name read from its description, or
+  // "Unmatched" when there is none.
+  function sKey(acct, date, cents){ return acct + "|" + date + "|" + cents; }
+  var LEGMAP = {};
+  (RECON.matched_pairs || []).forEach(function(p){ var c = Math.abs(toCents(p.amount));
+    LEGMAP[sKey(p.from_account, p.out_date, -c)] = p.to_account;
+    LEGMAP[sKey(p.to_account, p.in_date, c)] = p.from_account; });
+  (RECON.external || []).forEach(function(e){ var c = Math.abs(toCents(e.amount));
+    LEGMAP[sKey(e.from_account, e.date, e.incoming ? c : -c)] = e.to; });
+  var UNMATCHED = "Unmatched";
+  function counterOf(t){
+    var m = LEGMAP[sKey(t.account, t.date, toCents(t.amount))];
+    if(m != null) return { name: m, inferred: false };
+    var et = etransferInfo(t.merchant);
+    return { name: et ? et.who : UNMATCHED, inferred: true };
+  }
+  var ACCOUNTS = {}; TX.forEach(function(t){ if(t.account) ACCOUNTS[t.account] = 1; });
+  var INFER_TOP = 6;   // inferred counterparties drawn on the circle; the rest → Unmatched
+  // Focused account / party (null = the circle overview). Survives filter changes.
+  var FOCUS = null;    // {node, path:[cat, sub], all:{col:true}, history:[node…]}
+  // A pick made inside the focus view belongs to that view; drop it when leaving.
+  function dropFocusPick(){
+    if(SEL && SEL.key.indexOf("ff|") === 0){ SEL = null; renderTxWin(); markPicked(); }
+  }
+  function focusOn(node){
+    if(FOCUS && FOCUS.node === node) return;
+    dropFocusPick();
+    FOCUS = { node: node, path: [], all: {}, history: FOCUS ? FOCUS.history.concat([FOCUS.node]) : [] };
+    renderTransfers(lastRows);
+  }
+
   function renderTransfers(rows){
     var el = document.getElementById("transfers-panel");
     // Scope the precomputed reconciliation to the CURRENT filter by keeping only
-    // the legs whose underlying transaction survived every active filter. Each
-    // transfer leg is keyed by account|date|abs-cents — and the filtered `rows`
-    // already passed person/account/month AND category/subcategory/kind/merchant-
-    // regex/amount, so this makes the whole section honour all of them.
+    // the legs whose underlying transaction survived every active filter (the
+    // filtered `rows` already passed every facet, date, amount and merchant regex).
     var legKeys = {};
     rows.forEach(function(t){
       if(t.kind !== "transfer") return;
-      legKeys[t.account + "|" + t.date + "|" + toCents(t.amount)] = 1;
+      legKeys[sKey(t.account, t.date, toCents(t.amount))] = 1;
     });
-    function hasLeg(acct, date, amtStr, sign){
-      return !!legKeys[acct + "|" + date + "|" + sign * Math.abs(toCents(amtStr))];
-    }
+    function hasLeg(acct, date, amtStr, sign){ return !!legKeys[sKey(acct, date, sign * Math.abs(toCents(amtStr)))]; }
     var pairs = (RECON.matched_pairs || []).filter(function(p){
       return hasLeg(p.from_account, p.out_date, p.amount, -1) || hasLeg(p.to_account, p.in_date, p.amount, 1); });
     var ext = (RECON.external || []).filter(function(e){
@@ -932,21 +972,18 @@ export function runReport(DATA, OPTS){
 
     var html = "";
     if(anyFilterActive()) html += '<div class="scope-note">Reflects the current filter.</div>';
-    // Rebuild a simple flow graph from the filtered rows.
-    var edgeMap = {}, nodeSet = {};
+    var edgeMap = {}, nodeSet = {}, inferredNodes = {};
     var externalIds = {}; (RECON.graph && RECON.graph.nodes || []).forEach(function(n){ if(n.external) externalIds[n.id] = 1; });
     (RECON.external || []).forEach(function(e){ externalIds[e.to] = 1; });
-    // Each edge also collects its transfer legs (account|date|abs-cents), so a
-    // click can list exactly the transactions behind the line's amount.
-    function addEdge(from, to, cents, legs){
+    // Each edge collects its legs, so a click lists exactly the transactions behind it.
+    function addEdge(from, to, cents, legs, inferred){
       nodeSet[from] = 1; nodeSet[to] = 1;
-      var k = from + "\u241F" + to, e = edgeMap[k] || (edgeMap[k] = {from:from, to:to, net:0, count:0, legs:{}});
+      var k = from + "␟" + to + (inferred ? "␟~" : "");
+      var e = edgeMap[k] || (edgeMap[k] = {from:from, to:to, net:0, count:0, legs:{}, inferred:!!inferred});
       e.net += cents; e.count += 1;
       legs.forEach(function(l){ e.legs[l] = 1; });
     }
-    // SIGNED: a −383.29 to someone and a +383.29 from someone else on the same day
-    // in the same account are different legs (out = −, in = +).
-    function legKey(acct, date, amtStr, sign){ return acct + "|" + date + "|" + sign * Math.abs(toCents(amtStr)); }
+    function legKey(acct, date, amtStr, sign){ return sKey(acct, date, sign * Math.abs(toCents(amtStr))); }
     pairs.forEach(function(p){ addEdge(p.from_account, p.to_account, Math.abs(toCents(p.amount)),
       [legKey(p.from_account, p.out_date, p.amount, -1), legKey(p.to_account, p.in_date, p.amount, 1)]); });
     // An external leg points the way the money moved (incoming = from the external side).
@@ -954,16 +991,35 @@ export function runReport(DATA, OPTS){
       var c = Math.abs(toCents(e.amount)), l = [legKey(e.from_account, e.date, e.amount, e.incoming ? 1 : -1)];
       if(e.incoming) addEdge(e.to, e.from_account, c, l); else addEdge(e.from_account, e.to, c, l);
     });
+    // Unresolved legs: drawn dashed to an inferred counterparty. The busiest few get
+    // their own dot; the rest share "Unmatched" so the circle stays readable.
+    var inf = rows.filter(function(t){ return t.kind === "transfer" && t.account && counterOf(t).inferred; });
+    var infVol = {};
+    inf.forEach(function(t){ var n = counterOf(t).name; infVol[n] = (infVol[n] || 0) + Math.abs(toCents(t.amount)); });
+    var keep = {}; Object.keys(infVol).filter(function(n){ return n !== UNMATCHED; })
+      .sort(function(x, y){ return infVol[y] - infVol[x]; }).slice(0, INFER_TOP).forEach(function(n){ keep[n] = 1; });
+    inf.forEach(function(t){
+      var n = counterOf(t).name; if(!keep[n]) n = UNMATCHED;
+      inferredNodes[n] = 1;
+      var c = toCents(t.amount), k = [sKey(t.account, t.date, c)];
+      if(c < 0) addEdge(t.account, n, -c, k, true); else addEdge(n, t.account, c, k, true);
+    });
+    // Every account in the selection is on the circle, even with no transfers.
+    rows.forEach(function(t){ if(t.account) nodeSet[t.account] = 1; });
     var nodes = Object.keys(nodeSet).sort();
     var edges = Object.keys(edgeMap).map(function(k){ return edgeMap[k]; });
 
     if(!nodes.length){
-      el.innerHTML = html + '<div class="empty">No transfers in the current selection.</div>'; return; }
+      FOCUS = null;
+      el.innerHTML = html + '<div class="empty">No accounts in the current selection.</div>'; return; }
 
-    html += '<div class="flow" id="flow-graph"></div>'+
-      '<div class="flow-legend"><span class="flow-key"></span> money leaves (red) → arrives (green), narrowing toward where it lands · '+
-      'width = amount · ○ external account · drag the dots · click a ribbon or a dot to list its transfers '+
-      '<button type="button" class="btn small flow-reset" hidden>↺ Reset layout</button></div>';
+    var focusing = !!FOCUS;
+    html += '<div class="flow-crumbs" id="flow-crumbs"></div><div class="flow" id="flow-graph"></div>'+
+      '<div class="flow-legend"><span class="flow-key"></span> money leaves (red) → arrives (green) · width = amount · '+
+      (focusing
+        ? 'money in on the left, out on the right · click a category to drill into subcategories and merchants · click an account or person to follow the money there · dashed = inferred (unresolved transfer)'
+        : 'narrowing toward where it lands · ○ external account · dashed = inferred from the description · drag the dots · click a ribbon or dot to list its transfers · <b>click a name to explore it</b> '+
+          '<button type="button" class="btn small flow-reset" hidden>↺ Reset layout</button>')+'</div>';
     if(pairs.length){
       var pairsTot = pairs.reduce(function(a,p){ return a + Math.abs(toCents(p.amount)); }, 0);
       var pairsBody = '<table><thead><tr><th>From</th><th>To</th><th class="num">Amount</th><th>Out</th><th>In</th><th>Confidence</th></tr></thead><tbody>'+
@@ -983,7 +1039,263 @@ export function runReport(DATA, OPTS){
     }
     el.innerHTML = html;
     wireCollapsibles(el);
-    drawFlowGraph(nodes, edges, externalIds);
+    if(focusing) drawFocus(rows, externalIds, inferredNodes);
+    else drawFlowGraph(nodes, edges, externalIds, inferredNodes);
+  }
+
+  // ---------- focus view: one account (or outside party), money in → it → money out ----------
+  // A Sankey: sources on the left, the focused node in the middle, destinations on
+  // the right. Spend categories drill into subcategories, then merchants (one path
+  // at a time); accounts and people refocus. Each column shows its top FOCUS_TOP
+  // plus "Other (N)". Every node and band is a pick for the Transactions window.
+  var FOCUS_TOP = 8;
+  function drawFocus(rows, externalIds, inferredNodes){
+    var el = document.getElementById("flow-graph"), crumbs = document.getElementById("flow-crumbs");
+    if(!el) return;
+    var X = FOCUS.node, isAcct = !!ACCOUNTS[X];
+    var mag = function(t){ return Math.abs(toCents(t.amount)); };
+    // Which left/right node a row belongs to in this focus (null = not part of it).
+    function classify(t){
+      if(isAcct){
+        if(t.account !== X) return null;
+        var c = toCents(t.amount);
+        if(t.kind === "spend") return { side: "R", id: "cat|" + t.category, label: t.category, kind: "cat", v: Math.abs(c) };
+        if(t.kind === "income"){ var src = t.subcategory || t.category;
+          return { side: "L", id: "inc|" + src, label: src, kind: "inc", v: c }; }
+        if(t.kind === "transfer"){ var cp = counterOf(t);
+          return { side: c < 0 ? "R" : "L", id: "party|" + cp.name, label: cp.name, kind: "party", party: cp.name, inferred: cp.inferred, v: Math.abs(c) }; }
+        return { side: c < 0 ? "R" : "L", id: "unc", label: "Unknown kind", kind: "unc", v: Math.abs(c) };
+      }
+      if(t.kind !== "transfer" || !t.account) return null;
+      var p = counterOf(t);
+      if(p.name !== X) return null;
+      // The account paid X → money comes INTO X from it (left); X paid the account → right.
+      return { side: toCents(t.amount) < 0 ? "L" : "R", id: "party|" + t.account, label: t.account, kind: "party", party: t.account, inferred: p.inferred, v: mag(t) };
+    }
+    function group(list, keyOf){
+      var g = {};
+      list.forEach(function(t){ var k = keyOf(t); if(!k) return;
+        var n = g[k.id] || (g[k.id] = { id: k.id, label: k.label, kind: k.kind, party: k.party, inferred: k.inferred, value: 0, n: 0 });
+        n.value += k.v; n.n += 1; if(k.inferred === false) n.inferred = false; });
+      return Object.keys(g).map(function(k){ return g[k]; }).filter(function(n){ return n.value > 0; })
+        .sort(function(a, b){ return b.value - a.value; });
+    }
+    var mine = rows.filter(function(t){ return !!classify(t); });
+    var L = group(mine, function(t){ var c = classify(t); return c.side === "L" ? c : null; });
+    var R = group(mine, function(t){ var c = classify(t); return c.side === "R" ? c : null; });
+    var path = FOCUS.path.filter(function(x){ return x != null; });
+    // Drill columns under the expanded category / subcategory.
+    var cat = path[0], sub = path[1];
+    if(cat && !R.some(function(n){ return n.id === "cat|" + cat; })){ cat = sub = null; FOCUS.path = []; }
+    var inCat = function(t){ var c = classify(t); return c && c.id === "cat|" + cat; };
+    var R2 = cat ? group(mine.filter(inCat), function(t){ return { id: "sub|" + t.subcategory, label: t.subcategory, kind: "sub", v: mag(t) }; }) : null;
+    if(sub && !(R2 || []).some(function(n){ return n.id === "sub|" + sub; })){ sub = null; FOCUS.path = [cat]; }
+    var R3 = sub ? group(mine.filter(function(t){ return inCat(t) && t.subcategory === sub; }),
+      function(t){ return { id: "mer|" + t.merchant, label: t.merchant, kind: "mer", v: mag(t) }; }) : null;
+
+    // Predicates for picks: a column node = rows mapped to it.
+    function testFor(col, id){
+      if(col === "L" || col === "R") return function(t){ var c = classify(t); return !!c && c.side === col && c.id === id; };
+      if(col === "R2") return function(t){ return inCat(t) && "sub|" + t.subcategory === id; };
+      return function(t){ return inCat(t) && t.subcategory === sub && "mer|" + t.merchant === id; };
+    }
+    // Top N + "Other (k)"; an expanded node always stays visible.
+    function topN(list, col, keepId){
+      if(FOCUS.all[col] || list.length <= FOCUS_TOP + 1) return list.map(function(n){ n.test = testFor(col, n.id); return n; });
+      var shown = list.slice(0, FOCUS_TOP), rest = list.slice(FOCUS_TOP);
+      var ki = keepId ? rest.findIndex(function(n){ return n.id === keepId; }) : -1;
+      if(ki >= 0){ shown.push(rest[ki]); rest.splice(ki, 1); }
+      shown.forEach(function(n){ n.test = testFor(col, n.id); });
+      var tests = rest.map(function(n){ return testFor(col, n.id); });
+      shown.push({ id: "other|" + col, label: "Other (" + rest.length + ")", kind: "other", col: col,
+        value: rest.reduce(function(a, n){ return a + n.value; }, 0), n: rest.reduce(function(a, n){ return a + n.n; }, 0),
+        test: function(t){ return tests.some(function(f){ return f(t); }); } });
+      return shown;
+    }
+    var cols = [
+      { key: "L", nodes: topN(L, "L") },
+      { key: "C", nodes: [{ id: "center", label: X, kind: "center", value: 0, n: mine.length,
+          test: function(t){ return !!classify(t); } }] },
+      { key: "R", nodes: topN(R, "R", cat ? "cat|" + cat : null) },
+    ];
+    if(R2) cols.push({ key: "R2", nodes: topN(R2, "R2", sub ? "sub|" + sub : null) });
+    if(R3) cols.push({ key: "R3", nodes: topN(R3, "R3") });
+    var sum = function(ns){ return ns.reduce(function(a, n){ return a + n.value; }, 0); };
+    var inTot = sum(cols[0].nodes), outTot = sum(cols[2].nodes);
+    cols[1].nodes[0].value = Math.max(inTot, outTot, 1);
+
+    // The level the breadcrumb ends at: the open subcategory, category, or X itself.
+    var levelNode = cols[1].nodes[0], levelKey = "ff|" + X + "|C|center";
+    if(sub){ cols[3].nodes.forEach(function(nd){ if(nd.id === "sub|" + sub){ levelNode = nd; levelKey = "ff|" + X + "|R2|" + nd.id; } }); }
+    else if(cat){ cols[2].nodes.forEach(function(nd){ if(nd.id === "cat|" + cat){ levelNode = nd; levelKey = "ff|" + X + "|R|" + nd.id; } }); }
+    // ---- breadcrumb ----
+    var crumbHtml = (FOCUS.history.length ? '<button type="button" class="btn small fc-back" title="Back to ' + esc(FOCUS.history[FOCUS.history.length - 1]) + '">◂ Back</button> ' : '') +
+      '<a href="#" class="fc-crumb" data-lvl="all">All accounts</a> › <a href="#" class="fc-crumb" data-lvl="0">' + esc(X) + '</a>' +
+      (cat ? ' › <a href="#" class="fc-crumb" data-lvl="1">' + esc(cat) + '</a>' : '') +
+      (sub ? ' › <span>' + esc(sub) + '</span>' : '') +
+      '<span class="muted fc-tot"> · in <b class="pos">' + fmtMoney(inTot) + '</b> · out <b class="neg">' + fmtMoney(outTot) + '</b></span>' +
+      ' <button type="button" class="btn small fc-list" title="Show this level’s transactions in the Transactions window">≡ ' +
+        levelNode.n + ' transaction' + (levelNode.n === 1 ? '' : 's') + '</button>' +
+      (OPTS.onEditPeople && X !== UNMATCHED && !inferredNodes[X]
+        ? ' <button type="button" class="btn small fc-edit" title="Rename it, change its owner, or give its statements an account">✎ ' +
+          (X === "unassigned" ? "Assign accounts…" : "Rename / owner…") + '</button>' : '');
+    crumbs.innerHTML = crumbHtml;
+    var list = crumbs.querySelector(".fc-list");
+    if(list) list.addEventListener("click", function(){
+      var p = PICKS[levelKey];
+      if(p && !(SEL && SEL.key === p.key)) selectTx(p); else if(p) TXWIN.open();
+    });
+    crumbs.querySelectorAll(".fc-crumb").forEach(function(a){
+      a.addEventListener("click", function(ev){ ev.preventDefault();
+        var lvl = a.getAttribute("data-lvl");
+        if(lvl === "all") FOCUS = null; else FOCUS.path = FOCUS.path.slice(0, +lvl);
+        dropFocusPick();
+        renderTransfers(lastRows); });
+    });
+    var edit = crumbs.querySelector(".fc-edit");
+    if(edit) edit.addEventListener("click", function(){ OPTS.onEditPeople(X === "unassigned" ? undefined : X); });
+    var back = crumbs.querySelector(".fc-back");
+    if(back) back.addEventListener("click", function(){
+      var prev = FOCUS.history.pop(); FOCUS = { node: prev, path: [], all: {}, history: FOCUS.history }; dropFocusPick(); renderTransfers(lastRows); });
+
+    // ---- layout ----
+    var W = el.clientWidth || 900, NODE_W = 12, GAP = 8, TOP = 34, BOT = 14;
+    var most = Math.max.apply(null, cols.map(function(c){ return c.nodes.length; }));
+    var need = TOP + BOT + most * 30;
+    var H = inWin(el) ? Math.max(260, el.clientHeight, need) : Math.max(380, Math.min(900, need));
+    var labelL = Math.min(200, Math.round(W * 0.2)), labelR = Math.min(220, Math.round(W * 0.22));
+    var n = cols.length, x0 = labelL, x1 = W - labelR - NODE_W;
+    var step = n > 1 ? (x1 - x0) / (n - 1) : 0;
+    cols.forEach(function(c, i){ c.x = Math.round(x0 + i * step); });
+    var k = Infinity;
+    cols.forEach(function(c){
+      var tot = sum(c.nodes); if(!tot) return;
+      k = Math.min(k, (H - TOP - BOT - GAP * (c.nodes.length - 1)) / tot);
+    });
+    if(!isFinite(k) || k <= 0) k = 0;
+    // Each node gets at least a label's height of room (tiny flows stay legible);
+    // if that no longer fits, the view grows taller instead of overlapping.
+    var SLOT = 15;
+    cols.forEach(function(c){
+      c.hs = c.nodes.map(function(nd){ return Math.max(2, nd.value * k); });
+      c.tot = c.hs.reduce(function(a, h){ return a + Math.max(h, SLOT); }, 0) + GAP * Math.max(0, c.nodes.length - 1);
+    });
+    H = Math.max(H, TOP + BOT + Math.max.apply(null, cols.map(function(c){ return c.tot; })));
+    cols.forEach(function(c){
+      var y = TOP + Math.max(0, (H - TOP - BOT - c.tot) / 2);
+      c.nodes.forEach(function(nd, j){
+        var h = c.hs[j], slot = Math.max(h, SLOT);
+        nd.y = y + (slot - h) / 2; nd.h = h; nd.x = c.x; nd.outOff = 0; nd.inOff = 0; y += slot + GAP;
+      });
+    });
+    var center = cols[1].nodes[0];
+
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, "font-family": "inherit", "class": "focus-svg" });
+    var defs = svgEl("defs", {}); svg.appendChild(defs);
+    var gBands = svgEl("g", {}), gNodes = svgEl("g", {});
+    svg.appendChild(gBands); svg.appendChild(gNodes);
+    var uid = "fc" + Math.random().toString(36).slice(2, 7), gi = 0;
+    function pickKey(col, nd){ return "ff|" + X + "|" + col + "|" + nd.id; }
+    function register(col, nd, label){
+      var key = pickKey(col, nd);
+      PICKS[key] = { key: key, label: label, test: nd.test };
+      return key;
+    }
+    function band(src, dst, v, key, inferred){
+      var th = Math.max(1, v * k);
+      var xs = src.x + NODE_W, xt = dst.x, ys = src.y + src.outOff, yt = dst.y + dst.inOff;
+      src.outOff += th; dst.inOff += th;
+      var mx = (xs + xt) / 2;
+      var d = "M " + xs + " " + ys + " C " + mx + " " + ys + ", " + mx + " " + yt + ", " + xt + " " + yt +
+        " L " + xt + " " + (yt + th) + " C " + mx + " " + (yt + th) + ", " + mx + " " + (ys + th) + ", " + xs + " " + (ys + th) + " Z";
+      var gid = uid + (gi++);
+      var grad = svgEl("linearGradient", { id: gid, gradientUnits: "userSpaceOnUse", x1: xs, y1: 0, x2: xt, y2: 0 });
+      var s0 = svgEl("stop", { offset: "0" }), s1 = svgEl("stop", { offset: "1" });
+      s0.setAttribute("style", "stop-color:var(--neg)"); s1.setAttribute("style", "stop-color:var(--pos)");
+      grad.appendChild(s0); grad.appendChild(s1); defs.appendChild(grad);
+      var g = svgEl("g", { "class": "fband" + (inferred ? " inferred" : ""), "data-qpick": key, tabindex: "-1" });
+      var path = svgEl("path", { d: d, fill: "url(#" + gid + ")" });
+      var tip = svgEl("title", {}); tip.textContent = (PICKS[key] && PICKS[key].label || "") + ": " + fmtMoney(v);
+      g.appendChild(tip); g.appendChild(path); gBands.appendChild(g);
+    }
+    // Bands: left → centre, centre → right, expanded category → subcategories → merchants.
+    cols[0].nodes.forEach(function(nd){ band(nd, center, nd.value, register("L", nd, nd.label + " → " + X), nd.inferred); });
+    cols[2].nodes.forEach(function(nd){ band(center, nd, nd.value, register("R", nd, X + " → " + nd.label), nd.inferred); });
+    if(R2){
+      var catNode = cols[2].nodes.filter(function(nd){ return nd.id === "cat|" + cat; })[0];
+      if(catNode) cols[3].nodes.forEach(function(nd){ band(catNode, nd, nd.value, register("R2", nd, X + " · " + cat + " / " + nd.label)); });
+    }
+    if(R3){
+      var subNode = cols[3].nodes.filter(function(nd){ return nd.id === "sub|" + sub; })[0];
+      if(subNode) cols[4].nodes.forEach(function(nd){ band(subNode, nd, nd.value, register("R3", nd, X + " · " + sub + " · " + nd.label)); });
+    }
+    register("C", center, X + " (all)");
+
+    // Nodes + labels.
+    var charW = 6.6;
+    cols.forEach(function(c, i){
+      var leftCol = i === 0, last = i === cols.length - 1;
+      var room = leftCol ? labelL - 10 : last ? labelR - 10 : step - NODE_W - 14;
+      c.nodes.forEach(function(nd){
+        var key = pickKey(c.key, nd);
+        var cls = "fnode fn-" + nd.kind + (nd.inferred ? " inferred" : "") + (nd.kind === "party" && externalIds[nd.party] ? " ext" : "") +
+          ((nd.kind === "cat" && nd.id === "cat|" + cat) || (nd.kind === "sub" && nd.id === "sub|" + sub) ? " open" : "");
+        // A box either navigates (drill / follow the money) or, at a leaf, shows
+        // its transactions — never both, so drilling leaves the window alone.
+        var navigates = nd.kind === "cat" || nd.kind === "sub" || nd.kind === "other" || nd.kind === "party";
+        var ga = { "class": cls, tabindex: "0", role: "button" };
+        ga[navigates ? "data-nav" : "data-qpick"] = key;
+        var g = svgEl("g", ga);
+        var r = svgEl("rect", { x: nd.x, y: nd.y, width: NODE_W, height: nd.h, rx: 2 });
+        g.appendChild(r);
+        var hint = nd.kind === "cat" || nd.kind === "sub" ? (nd.id === "cat|" + cat || nd.id === "sub|" + sub ? " ▾" : " ▸")
+          : nd.kind === "party" ? " ↗" : nd.kind === "other" ? " …" : "";
+        var amt = " " + fmtAxisNum(Math.round(nd.value / 100));
+        var maxChars = Math.max(6, Math.floor(room / charW) - amt.length - hint.length);
+        var name = nd.label.length > maxChars ? nd.label.slice(0, maxChars - 1) + "…" : nd.label;
+        var t = svgEl("text", { "class": "fn-lbl", y: (nd.y + nd.h / 2 + 4).toFixed(1) });
+        if(c.key === "C"){
+          t.setAttribute("x", nd.x + NODE_W / 2); t.setAttribute("y", nd.y - 10); t.setAttribute("text-anchor", "middle");
+          t.setAttribute("class", "fn-lbl fn-center-lbl");
+          t.textContent = nd.label;
+        } else {
+          t.setAttribute("x", leftCol ? nd.x - 6 : nd.x + NODE_W + 6);
+          t.setAttribute("text-anchor", leftCol ? "end" : "start");
+          t.textContent = name + hint;
+          var ts = svgEl("tspan", { "class": "fn-amt" }); ts.textContent = amt; t.appendChild(ts);
+        }
+        var tip = svgEl("title", {});
+        tip.textContent = nd.label + ": " + fmtMoney(nd.value) + " · " + nd.n + " transaction" + (nd.n === 1 ? "" : "s") +
+          (nd.kind === "cat" ? " — click to see subcategories" : nd.kind === "sub" ? " — click to see merchants" :
+           nd.kind === "party" ? " — click to follow the money there" : nd.kind === "other" ? " — click to show all" :
+           " — click to show these transactions");
+        g.appendChild(tip); g.appendChild(t); gNodes.appendChild(g);
+        g.addEventListener("click", function(){
+          if(nd.kind === "cat"){ FOCUS.path = cat === nd.id.slice(4) ? [] : [nd.id.slice(4)]; }
+          else if(nd.kind === "sub"){ FOCUS.path = sub === nd.id.slice(4) ? [cat] : [cat, nd.id.slice(4)]; }
+          else if(nd.kind === "other"){ FOCUS.all[nd.col] = !FOCUS.all[nd.col]; }
+          else if(nd.kind === "party"){ focusOn(nd.party); return; }
+          else return;
+          renderTransfers(lastRows);
+        });
+        if(navigates) g.addEventListener("keydown", function(ev){
+          if(ev.key === "Enter" || ev.key === " "){ ev.preventDefault(); g.dispatchEvent(new MouseEvent("click")); }
+        });
+      });
+    });
+    // Column headings.
+    [["Money in", cols[0].x, "end", NODE_W * -0.5], ["Money out", cols[2].x, "start", NODE_W * 1.5]].forEach(function(h){
+      var t = svgEl("text", { "class": "fc-head", x: h[1] + h[3], y: 14, "text-anchor": h[2] }); t.textContent = h[0]; svg.appendChild(t);
+    });
+    if(!cols[0].nodes.length){
+      var t0 = svgEl("text", { "class": "fc-none", x: cols[0].x, y: H / 2, "text-anchor": "end" }); t0.textContent = "nothing in"; svg.appendChild(t0);
+    }
+    if(!cols[2].nodes.length){
+      var t1 = svgEl("text", { "class": "fc-none", x: cols[2].x, y: H / 2 }); t1.textContent = "nothing out"; svg.appendChild(t1);
+    }
+    el.innerHTML = "";
+    el.appendChild(svg);
+    markPicked();
   }
 
   // A collapsed-by-default section: clickable header (caret + title + summary)
@@ -1013,9 +1325,11 @@ export function runReport(DATA, OPTS){
     for(var k in attrs) e.setAttribute(k, attrs[k]);
     return e;
   }
-  function drawFlowGraph(nodes, edges, externalIds){
+  function drawFlowGraph(nodes, edges, externalIds, inferredNodes){
+    inferredNodes = inferredNodes || {};
+    var crumbs = document.getElementById("flow-crumbs"); if(crumbs) crumbs.innerHTML = "";
     var el = document.getElementById("flow-graph");
-    if(!el || !nodes.length || !edges.length){ if(el) el.innerHTML = ""; return; }
+    if(!el || !nodes.length){ if(el) el.innerHTML = ""; return; }
     var W = el.clientWidth || 900;
     // On the page: height follows width. In a window: use the window's full shape.
     var H = inWin(el) ? Math.max(260, el.clientHeight)
@@ -1052,11 +1366,12 @@ export function runReport(DATA, OPTS){
       var s0 = svgEl("stop", { offset: "0" }), s1 = svgEl("stop", { offset: "1" });
       s0.setAttribute("style", "stop-color:var(--neg)"); s1.setAttribute("style", "stop-color:var(--pos)");
       grad.appendChild(s0); grad.appendChild(s1); defs.appendChild(grad);
-      var legs = e.legs;
-      var g = svgEl("g", { "class": "edge-g", "data-pick": "flow|" + e.from + "|" + e.to, tabindex: "0", role: "button" });
-      PICKS["flow|" + e.from + "|" + e.to] = { key: "flow|" + e.from + "|" + e.to, label: "Transfers " + e.from + " → " + e.to,
+      var legs = e.legs, ekey = "flow|" + e.from + "|" + e.to + (e.inferred ? "|~" : "");
+      var g = svgEl("g", { "class": "edge-g" + (e.inferred ? " inferred" : ""), "data-pick": ekey, tabindex: "0", role: "button" });
+      PICKS[ekey] = { key: ekey, label: "Transfers " + e.from + " → " + e.to + (e.inferred ? " (inferred)" : ""),
         test: function(t){ return t.kind === "transfer" && !!legs[t.account + "|" + t.date + "|" + toCents(t.amount)]; } };
-      var tip = svgEl("title", {}); tip.textContent = e.from + " → " + e.to + ": " + fmtMoney(e.net) + " in " + e.count + " transfer" + (e.count === 1 ? "" : "s");
+      var tip = svgEl("title", {}); tip.textContent = e.from + " → " + e.to + ": " + fmtMoney(e.net) + " in " + e.count + " transfer" + (e.count === 1 ? "" : "s") +
+        (e.inferred ? " (inferred from the description — no matching account or rule)" : "");
       var ribbon = svgEl("path", { "class": "ribbon", fill: "url(#" + uid + i + ")" });
       var hit = svgEl("path", { "class": "edge-hit" });
       g.appendChild(tip); g.appendChild(ribbon); g.appendChild(hit); gEdges.appendChild(g);
@@ -1109,10 +1424,12 @@ export function runReport(DATA, OPTS){
         if(t.kind !== "transfer") return false;
         var k = t.account + "|" + t.date + "|" + toCents(t.amount);
         return touching.some(function(x){ return !!x.e.legs[k]; }); } };
-      var g = svgEl("g", { "class": "node-g" + (externalIds[n] ? " ext" : ""), "data-pick": key, tabindex: "0", role: "button" });
-      var tip = svgEl("title", {}); tip.textContent = n + " — drag to move, click to list its transfers";
+      var g = svgEl("g", { "class": "node-g" + (externalIds[n] ? " ext" : "") + (inferredNodes[n] && !ACCOUNTS[n] ? " party" : ""), "data-pick": key, tabindex: "0", role: "button" });
+      var tip = svgEl("title", {}); tip.textContent = n + " — drag to move, click the dot to list its transfers, click the name to explore it";
       var c = svgEl("circle", { r: P[n].r.toFixed(1), "class": "node" });
-      var t = svgEl("text", { "class": "node-lbl" }); t.textContent = n;
+      var t = svgEl("text", { "class": "node-lbl link" }); t.textContent = n;
+      // The name opens the focus view (and must not also pick the dot).
+      t.addEventListener("click", function(ev){ ev.stopPropagation(); if(Date.now() - dragEnd >= 350) focusOn(n); });
       g.appendChild(tip); g.appendChild(c); g.appendChild(t); gNodes.appendChild(g);
       N_[n] = { g: g, c: c, t: t };
     });
@@ -1146,6 +1463,9 @@ export function runReport(DATA, OPTS){
         if(ev.button !== 0) return;
         var rect = svg.getBoundingClientRect(), sc = W / (rect.width || W);
         var moved = false, x0 = ev.clientX, y0 = ev.clientY;
+        // Pointer capture retargets the release (and its click) to the dot's group, so
+        // the name's own click handler never sees it: decide "explore" here instead.
+        var onName = !!(ev.target.closest && ev.target.closest(".node-lbl"));
         g.setPointerCapture(ev.pointerId);
         function mv(e){
           if(!moved && Math.hypot(e.clientX - x0, e.clientY - y0) < 4) return;
@@ -1162,6 +1482,9 @@ export function runReport(DATA, OPTS){
           if(moved){
             FLOWPOS[n] = [P[n].x / W, P[n].y / H]; saveFlowPos(); syncReset();
             dragEnd = Date.now();
+          } else if(onName){
+            dragEnd = Date.now();   // swallow the click that follows, so it doesn't also list transactions
+            focusOn(n);
           }
         }
         g.addEventListener("pointermove", mv); g.addEventListener("pointerup", up); g.addEventListener("pointercancel", up);

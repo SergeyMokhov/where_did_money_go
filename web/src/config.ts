@@ -4,6 +4,7 @@
 import { DEMO_ID, resetDemo } from './demo';
 import { checkProject, defaultConfig, type FileCheck } from './engine';
 import { openMapper } from './mapper';
+import { openPeopleEditor } from './people';
 import { MAX_FILE_BYTES, exportBundle, exportZip, importZip, readZipEntries, type BundleKind } from './zip';
 import {
   CONFIG_NAMES, INSIGHTS_NAME, deleteProject, getActiveId, listProjects, newId,
@@ -278,6 +279,10 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
     })
       : [h('tr', {}, h('td', { class: 'empty', colspan: '4' }, 'No statement files yet.'))])));
   const badCount = checks.filter((c) => c.error).length;
+  const orphanFiles = checks.filter((c) => (c.accounts?.unassigned || 0) > 0).length;
+  const peopleBtn = (label: string, cls = 'btn small') => btn(label, async () => {
+    if (await openPeopleEditor(doc)) { await save(); toast('Saved people & accounts to people.toml.'); }
+  }, cls, 'Rename people and accounts, change owners, give statement files an account');
 
   // Config: every known file, present or falling back to the built-in default.
   let defaults: Record<string, string> = {};
@@ -315,8 +320,11 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
     h('h3', { class: 'cfg-h3' }, `Statements (${data.length})`, bundleBtns('data')),
     ...(badCount ? [h('div', { class: 'cfg-warn' }, `${badCount} file${badCount === 1 ? '' : 's'} can’t be read yet. Use “Map columns…” to teach the analyzer an unrecognised layout.`)] : []),
     ...(checkErr ? [h('div', { class: 'cfg-warn' }, `The configuration can’t be loaded: ${checkErr}`)] : []),
+    ...(orphanFiles ? [h('div', { class: 'cfg-warn' },
+      `${orphanFiles} statement file${orphanFiles === 1 ? ' has' : 's have'} rows that belong to no account. `,
+      peopleBtn('Assign accounts…', 'btn small active'))] : []),
     dataTbl,
-    h('h3', { class: 'cfg-h3' }, 'Configuration', bundleBtns('config')), cfgTbl,
+    h('h3', { class: 'cfg-h3' }, 'Configuration', h('span', { class: 'cfg-h3-btns' }, peopleBtn('👥 People & accounts…'), bundleBtns('config'))), cfgTbl,
     h('h3', { class: 'cfg-h3' }, 'AI insights'), insTbl,
   );
 }

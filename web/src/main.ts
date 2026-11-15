@@ -7,6 +7,8 @@ import { fileText, getActiveId, getProject, INSIGHTS_NAME, type ProjectDoc } fro
 import { runReport } from './report.js';
 import { drawChangePoints, initCpControls } from './cpview';
 import { openConfig } from './config';
+import { openPeopleEditor } from './people';
+import { saveProject } from './store';
 import { initYank } from './yank';
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
@@ -79,8 +81,24 @@ function renderStatic(doc: ProjectDoc, res: AnalyzeResult, insights: Insights) {
 }
 
 /** Problems worth telling the user about, shown above the report. */
-function renderNotices(res: AnalyzeResult | null, extra: string[]) {
-  const msgs = [...extra];
+/** Open the People & accounts editor from the report; a save re-analyzes (reload). */
+function editPeopleFrom(doc: ProjectDoc, focus?: string) {
+  openPeopleEditor(doc, { focus }).then(async (saved) => {
+    if (saved) { await saveProject(doc); location.reload(); }
+  });
+}
+
+function renderNotices(res: AnalyzeResult | null, extra: (string | Node)[], doc?: ProjectDoc) {
+  const msgs: (string | Node)[] = [...extra];
+  // Rows no account in people.toml claims: offer to assign them right here.
+  const orphans = (res?.analysis?.transactions || []).filter((t: any) => t.account === 'unassigned').length;
+  if (orphans && doc) {
+    const line = el('div', 'notice-row');
+    const b = el('button', 'btn small active', 'Assign accounts…');
+    b.addEventListener('click', () => editPeopleFrom(doc));
+    line.append(`${orphans.toLocaleString()} transaction${orphans === 1 ? '' : 's'} belong to no account (shown as “unassigned”). `, b);
+    msgs.push(line);
+  }
   if (res) {
     for (const e of res.load_report.errors) {
       msgs.push(/no profile matched/.test(e.error)
@@ -96,7 +114,7 @@ function renderNotices(res: AnalyzeResult | null, extra: string[]) {
     box.id = 'notices';
     document.querySelector('#report-root .wrap header')?.after(box);
   }
-  box.replaceChildren(...msgs.map((m) => el('div', undefined, m)));
+  box.replaceChildren(...msgs.map((m) => (typeof m === 'string' ? el('div', undefined, m) : m)));
 }
 
 async function boot() {
@@ -136,11 +154,14 @@ async function boot() {
   renderNotices(res, [
     ...(error ? [error] : []),
     ...(noData ? ['This project has no transactions yet — add statement CSVs in ⚙ Configuration.'] : []),
-  ]);
+  ], doc);
   // CP settings must be loaded before runReport, which may draw the CP view at init.
   let api: { redraw: () => void } | null = null;
   initCpControls(doc.id, () => api?.redraw());
-  api = runReport({ analysis: res.analysis, insights }, { projectId: doc.id, drawChangePoints });
+  api = runReport({ analysis: res.analysis, insights }, {
+    projectId: doc.id, drawChangePoints,
+    onEditPeople: (focus?: string) => editPeopleFrom(doc, focus),
+  });
   initYank($('report-root'));
 }
 

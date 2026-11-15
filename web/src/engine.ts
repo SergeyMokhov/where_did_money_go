@@ -46,6 +46,14 @@ export function analyzeProject(doc: ProjectDoc): AnalyzeResult {
 export interface FileCheck {
   file: string; profile: string | null; rows: number; error: string | null; unrecognized: boolean;
   sample: { date: string; amount: string; merchant: string; kind: string }[];
+  /** Rows per account after identity resolution; `unassigned` = no account claims them. */
+  accounts: Record<string, number>;
+  /** Rows that also fit another account, shadowed by the one they went to. */
+  also: Record<string, number>;
+  /** Rows per cardholder value (empty when the format has no cardholder column). */
+  cardholders: Record<string, number>;
+  /** Id the format captures from the file name (e.g. a card's last 4). */
+  file_id: string | null;
 }
 
 /** Detect + parse each file on its own (cheap; no analysis). */
@@ -85,4 +93,39 @@ export function changepoints(input: {
   start: string; daily: number[]; metric: Metric; sensitivity: Sensitivity; min_days: number; bucket: Gran;
 }): CpResult {
   return JSON.parse(wasm.changepoints(JSON.stringify(input)));
+}
+
+// ---------- people.toml (household identity) ----------
+export interface PeopleAccount {
+  id: string; kind: string; external: boolean;
+  cardholder?: string | null; card_last4?: string | null; filename?: string | null; profile?: string | null;
+}
+export interface PeoplePerson { id: string; display_name: string; account: PeopleAccount[] }
+export interface PeopleDoc {
+  schema_version: number; person: PeoplePerson[];
+  transfer_rule: { pattern: string; to: string; priority: number }[];
+}
+export type PeopleOp =
+  | { op: 'add_person'; id: string; display_name?: string }
+  | { op: 'rename_person'; from: string; to: string }
+  | { op: 'rename_account'; from: string; to: string }
+  | { op: 'move_account'; account: string; to_person: string }
+  | { op: 'add_account'; person: string; id: string; kind: string; file?: string; external?: boolean }
+  | { op: 'link_file'; account: string; file: string }
+  | { op: 'set_kind'; account: string; kind: string }
+  | { op: 'set_match'; account: string; filename?: string | null; profile?: string | null; cardholder?: string | null; card_last4?: string | null }
+  | { op: 'make_external'; account: string }
+  | { op: 'delete_account'; account: string }
+  | { op: 'delete_person'; person: string };
+
+/** The project's people.toml, or the built-in default when it has none. */
+export function peopleText(doc: ProjectDoc): string {
+  return projectConfig(doc)['people.toml'] ?? defaultConfig()['people.toml'] ?? 'schema_version = 1\n';
+}
+export function parsePeople(text: string): PeopleDoc {
+  return JSON.parse(wasm.parse_people(text));
+}
+/** Apply edits with the engine (comments and layout in the file are kept). Throws on a bad edit. */
+export function editPeople(text: string, ops: PeopleOp[]): string {
+  return wasm.edit_people(text, JSON.stringify(ops));
 }

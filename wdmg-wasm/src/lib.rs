@@ -167,6 +167,17 @@ struct FileCheck {
     unrecognized: bool,
     /// First few parsed rows, so the UI can show how the file was read.
     sample: Vec<SampleRow>,
+    /// Rows per account after identity resolution (`unassigned` = no account
+    /// in people.toml claims them), so the UI can offer to assign the file.
+    accounts: BTreeMap<String, usize>,
+    /// Rows that also fit an account other than the one they went to (shadowed
+    /// by an earlier account), per shadowed account.
+    also: BTreeMap<String, usize>,
+    /// Rows per distinct cardholder value (empty when the format has no
+    /// cardholder column).
+    cardholders: BTreeMap<String, usize>,
+    /// The id the format captures from the file name (e.g. a card's last 4).
+    file_id: Option<String>,
 }
 
 /// Detect and parse each file on its own (no analysis): per-file profile, row
@@ -179,7 +190,45 @@ pub fn check_files_json(files: &[(String, Vec<u8>)], config_json: &str) -> Resul
         .map(|(name, bytes)| {
             let label = std::path::Path::new(name);
             match wdmg::ingest::load_bytes(&config, label, bytes) {
-                Ok(txns) => FileCheck {
+                Ok(mut txns) => FileCheck {
+                    accounts: {
+                        wdmg::identity::resolve(&config, &mut txns);
+                        let mut m = BTreeMap::new();
+                        for t in &txns {
+                            let k = t.account_id.clone().unwrap_or_else(|| "unassigned".into());
+                            *m.entry(k).or_insert(0) += 1;
+                        }
+                        m
+                    },
+                    also: {
+                        let mut m = BTreeMap::new();
+                        for t in &txns {
+                            for a in wdmg::identity::matching_accounts(&config, t)
+                                .into_iter()
+                                .skip(1)
+                            {
+                                *m.entry(a.to_string()).or_insert(0) += 1;
+                            }
+                        }
+                        m
+                    },
+                    cardholders: {
+                        let mut m = BTreeMap::new();
+                        for t in &txns {
+                            if let Some(c) = t
+                                .cardholder
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|c| !c.is_empty())
+                            {
+                                *m.entry(c.to_string()).or_insert(0) += 1;
+                            }
+                        }
+                        m
+                    },
+                    file_id: txns
+                        .first()
+                        .and_then(|t| wdmg::identity::filename_id(&config, t)),
                     file: name.clone(),
                     profile: txns.first().map(|t| t.profile_id.clone()).or_else(|| {
                         wdmg::ingest::detect::decode(label, bytes)
@@ -208,11 +257,26 @@ pub fn check_files_json(files: &[(String, Vec<u8>)], config_json: &str) -> Resul
                     unrecognized: matches!(e, wdmg::error::IngestError::NoProfileMatch { .. }),
                     error: Some(error_chain(&e)),
                     sample: Vec::new(),
+                    accounts: BTreeMap::new(),
+                    also: BTreeMap::new(),
+                    cardholders: BTreeMap::new(),
+                    file_id: None,
                 },
             }
         })
         .collect();
     serde_json::to_string(&out).map_err(|e| format!("failed to serialize file checks: {e}"))
+}
+
+/// Apply structured edits to `people.toml` text (comments preserved).
+pub fn edit_people_json(text: &str, ops_json: &str) -> Result<String, String> {
+    wdmg::config::people_edit::apply_json(text, ops_json).map_err(|e| e.to_string())
+}
+
+/// `people.toml` text → its parsed form as JSON (persons, accounts, rules).
+pub fn people_json(text: &str) -> Result<String, String> {
+    let doc = wdmg::config::people_edit::parse(text).map_err(|e| e.to_string())?;
+    serde_json::to_string(&doc).map_err(|e| format!("failed to serialize people: {e}"))
 }
 
 /// Validate a change-point request JSON and run the engine.
@@ -276,6 +340,19 @@ pub fn changepoints(input_json: &str) -> Result<String, JsError> {
     changepoints_json(input_json).map_err(|e| JsError::new(&e))
 }
 
+/// Edit `people.toml`; `ops_json` is a JSON array of ops (see wdmg's
+/// `config::people_edit::PeopleOp`). Returns the new text.
+#[wasm_bindgen]
+pub fn edit_people(text: &str, ops_json: &str) -> Result<String, JsError> {
+    edit_people_json(text, ops_json).map_err(|e| JsError::new(&e))
+}
+
+/// Parse `people.toml` text into JSON for the UI.
+#[wasm_bindgen]
+pub fn parse_people(text: &str) -> Result<String, JsError> {
+    people_json(text).map_err(|e| JsError::new(&e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +394,21 @@ mod tests {
         assert_eq!(lr["errors"][0]["file"], "bad.csv");
         assert!(out["analysis"]["transactions"].is_array());
         assert!(out["review_queue"]["unknown_merchants"].is_array());
+    }
+
+    #[test]
+    fn check_files_reports_cardholders_and_file_id() {
+        let csv = "\"Description\",\"Type\",\"Card Holder Name\",\"Date\",\"Time\",\"Amount\"\n\
+                   \"CAFE 3000\",\"PURCHASE\",\"FRY\",\"01/02/2997\",\"03:36 PM\",\"-6.05\"\n\
+                   \"EL CHEAPO\",\"PURCHASE\",\"BENDER\",\"01/03/2997\",\"10:14 AM\",\"-35.01\"\n";
+        let files = vec![("card_7011.csv".to_string(), csv.as_bytes().to_vec())];
+        let v: serde_json::Value =
+            serde_json::from_str(&check_files_json(&files, "").unwrap()).unwrap();
+        assert_eq!(v[0]["profile"], "mastercard_credit");
+        assert_eq!(v[0]["cardholders"]["FRY"], 1);
+        assert_eq!(v[0]["cardholders"]["BENDER"], 1);
+        assert_eq!(v[0]["file_id"], "7011");
+        assert!(v[0]["also"].is_object());
     }
 
     #[test]
