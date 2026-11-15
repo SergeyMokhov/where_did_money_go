@@ -13,6 +13,7 @@
 //! [`crate::model::TxnType`].
 
 pub mod anomaly;
+pub mod changepoint;
 pub mod flows;
 pub mod recurring;
 pub mod stats;

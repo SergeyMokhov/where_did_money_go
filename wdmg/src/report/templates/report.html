@@ -1138,7 +1138,8 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
       e.net += cents; e.count += 1;
     }
     pairs.forEach(function(p){ addEdge(p.from_account, p.to_account, Math.abs(toCents(p.amount))); });
-    ext.forEach(function(e){ addEdge(e.from_account, e.to, Math.abs(toCents(e.amount))); });
+    ext.forEach(function(e){ var c = Math.abs(toCents(e.amount));
+      if(e.incoming) addEdge(e.to, e.from_account, c); else addEdge(e.from_account, e.to, c); });
     var nodes = Object.keys(nodeSet).sort();
     var edges = Object.keys(edgeMap).map(function(k){ return edgeMap[k]; });
 
@@ -1159,7 +1160,7 @@ h2.sec-h.closed .caret{transform:rotate(-90deg);}
     if(ext.length){
       var extTot = ext.reduce(function(a,e){ return a + Math.abs(toCents(e.amount)); }, 0);
       var extBody = '<table><thead><tr><th>From</th><th>To</th><th class="num">Amount</th><th>Date</th></tr></thead><tbody>'+
-        ext.map(function(e){ return '<tr><td>'+esc(e.from_account)+'</td><td>→ '+esc(e.to)+
+        ext.map(function(e){ return '<tr><td>'+esc(e.from_account)+'</td><td>'+(e.incoming ? '← ' : '→ ')+esc(e.to)+
           '</td><td class="num">'+fmtMoney(toCents(e.amount))+'</td><td class="muted">'+esc(e.date)+'</td></tr>'; }).join("")+
         '</tbody></table>';
       html += collapsible("Sent to external accounts", ext.length + " · " + fmtMoney(extTot), extBody);

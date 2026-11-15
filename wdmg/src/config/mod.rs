@@ -15,6 +15,7 @@ pub mod people;
 pub mod profiles;
 pub mod settings;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use regex::{Regex, RegexBuilder};
@@ -25,7 +26,8 @@ pub use categories::{CategoriesDoc, Category, CategoryKind, Subcategory};
 pub use events::{EventsDoc, LifeEvent};
 pub use people::{Account, PeopleDoc, Person, TransferRule};
 pub use profiles::{
-    AccountSpec, AmountSpec, DateSpec, MemoSpec, MerchantSpec, Profile, ProfilesDoc, Sign, TypeSpec,
+    AccountSpec, AmountSpec, BySign, DateSpec, MemoSpec, MerchantSpec, Profile, ProfilesDoc, Sign,
+    TypeSpec,
 };
 pub use settings::{AnalysisProfile, AnalysisSettings, SettingsDoc};
 
@@ -217,6 +219,16 @@ impl CompiledProfile {
     /// Compile every regex in a profile, validating each at load time.
     fn compile(profile: Profile) -> Result<Self, ConfigError> {
         let ctx = &profile.id;
+        if let Some(bs) = &profile.type_spec.by_sign {
+            for (side, v) in [("negative", &bs.negative), ("positive", &bs.positive)] {
+                if !matches!(v.as_str(), "spend" | "income" | "transfer") {
+                    return Err(ConfigError::Invalid {
+                        context: format!("profile {ctx} [type.by_sign]"),
+                        message: format!("{side} = {v:?}; expected spend, income or transfer"),
+                    });
+                }
+            }
+        }
         // Anchor header_first_cell so an alternation "A|B" matches the WHOLE cell.
         let header_first_cell = match &profile.match_rules.header_first_cell {
             Some(p) => Some(compile(&format!("^(?:{p})$"), ctx)?),
@@ -279,20 +291,31 @@ impl CompiledProfile {
     }
 }
 
-fn read_toml<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>, ConfigError> {
+/// Read a config file's text from disk; `Ok(None)` when it does not exist.
+fn read_text(path: &Path) -> Result<Option<String>, ConfigError> {
     match std::fs::read_to_string(path) {
-        Ok(s) => {
-            let parsed = toml::from_str(&s).map_err(|source| ConfigError::Toml {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            Ok(Some(parsed))
-        }
+        Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(ConfigError::Read {
             path: path.to_path_buf(),
             source,
         }),
+    }
+}
+
+/// Parse an optional TOML text, attributing parse errors to `label` (a path on
+/// disk, or the bare file name for in-memory sources).
+fn parse_opt<T: serde::de::DeserializeOwned>(
+    text: Option<(String, PathBuf)>,
+) -> Result<Option<T>, ConfigError> {
+    match text {
+        Some((s, label)) => toml::from_str(&s)
+            .map(Some)
+            .map_err(|source| ConfigError::Toml {
+                path: label,
+                source,
+            }),
+        None => Ok(None),
     }
 }
 
@@ -377,33 +400,56 @@ impl Config {
         })
     }
 
-    /// Load configuration from `dir`. `categories.toml` and `learned.toml` are
-    /// layered onto the embedded defaults (user > learned > defaults). If a config
-    /// file is absent in `dir`, the embedded default is used.
-    pub fn load(dir: &Path) -> Result<Self, ConfigError> {
-        // Profiles & people: prefer the file in `dir`, else embedded defaults.
-        let profiles_doc: ProfilesDoc = match read_toml(&dir.join("profiles.toml"))? {
-            Some(d) => d,
-            None => parse_embedded(DEFAULT_PROFILES, "profiles")?,
+    /// The config file names [`Config::load`] / [`Config::from_texts`] consult.
+    pub const FILE_NAMES: [&'static str; 6] = [
+        "profiles.toml",
+        "categories.toml",
+        "people.toml",
+        "events.toml",
+        "settings.toml",
+        "learned.toml",
+    ];
+
+    /// The shared layering logic behind [`Config::load`] and
+    /// [`Config::from_texts`], so the two can never drift.
+    ///
+    /// `source(name)` returns the text of config file `name` (one of
+    /// [`Config::FILE_NAMES`]) plus the label to attribute parse errors to, or
+    /// `None` when the file is absent. Profiles are layered user > built-in (by
+    /// id); absent people fall back to the embedded defaults; categories are layered user > learned > defaults; absent
+    /// events/settings yield empty/consumer defaults.
+    fn from_source<F>(mut source: F) -> Result<Self, ConfigError>
+    where
+        F: FnMut(&str) -> Result<Option<(String, PathBuf)>, ConfigError>,
+    {
+        // Profiles: the supplied file's formats first (so they win detection and
+        // can override a built-in by reusing its id), then every built-in format
+        // it does not override — known layouts are always recognised, and a
+        // user's profiles.toml only needs their own additions.
+        let builtin: ProfilesDoc = parse_embedded(DEFAULT_PROFILES, "profiles")?;
+        let profiles_doc = match parse_opt::<ProfilesDoc>(source("profiles.toml")?)? {
+            Some(user) => user.layered_over(builtin),
+            None => builtin,
         };
-        let people: PeopleDoc = match read_toml(&dir.join("people.toml"))? {
+        // People: prefer the supplied file, else embedded defaults.
+        let people: PeopleDoc = match parse_opt(source("people.toml")?)? {
             Some(d) => d,
             None => parse_embedded(DEFAULT_PEOPLE, "people")?,
         };
 
         // Categories: defaults < learned < user.
         let defaults: CategoriesDoc = parse_embedded(DEFAULT_CATEGORIES, "categories")?;
-        let learned: Option<CategoriesDoc> = read_toml(&dir.join("learned.toml"))?;
-        let user: Option<CategoriesDoc> = read_toml(&dir.join("categories.toml"))?;
+        let learned: Option<CategoriesDoc> = parse_opt(source("learned.toml")?)?;
+        let user: Option<CategoriesDoc> = parse_opt(source("categories.toml")?)?;
         let categories = defaults.merge(learned, user);
 
         // Optional life-event annotations (validated + date-sorted; empty if absent).
-        let events = read_toml::<EventsDoc>(&dir.join("events.toml"))?
+        let events = parse_opt::<EventsDoc>(source("events.toml")?)?
             .unwrap_or_default()
             .validated()?;
 
         // Optional analysis settings (persona profile + jurisdiction params).
-        let settings = read_toml::<SettingsDoc>(&dir.join("settings.toml"))?
+        let settings = parse_opt::<SettingsDoc>(source("settings.toml")?)?
             .unwrap_or_default()
             .validated();
 
@@ -411,6 +457,28 @@ impl Config {
         config.events = events;
         config.settings = settings;
         Ok(config)
+    }
+
+    /// Load configuration from `dir`. `categories.toml` and `learned.toml` are
+    /// layered onto the embedded defaults (user > learned > defaults). If a config
+    /// file is absent in `dir`, the embedded default is used.
+    pub fn load(dir: &Path) -> Result<Self, ConfigError> {
+        Self::from_source(|name| {
+            let path = dir.join(name);
+            Ok(read_text(&path)?.map(|text| (text, path)))
+        })
+    }
+
+    /// Build configuration from in-memory TOML texts keyed by file name (see
+    /// [`Config::FILE_NAMES`]; other keys are ignored). Semantics are identical to
+    /// [`Config::load`] with a directory holding exactly these files: a missing
+    /// key behaves like a missing file. Parse errors name the offending key.
+    pub fn from_texts(texts: &BTreeMap<String, String>) -> Result<Self, ConfigError> {
+        Self::from_source(|name| {
+            Ok(texts
+                .get(name)
+                .map(|text| (text.clone(), PathBuf::from(name))))
+        })
     }
 
     /// Load a [`Config`] entirely from the embedded defaults (no filesystem).
@@ -429,7 +497,7 @@ mod tests {
     #[test]
     fn embedded_defaults_parse_and_compile() {
         let cfg = Config::from_defaults().expect("defaults must build");
-        assert_eq!(cfg.profiles.len(), 4);
+        assert_eq!(cfg.profiles.len(), 5);
         assert!(cfg
             .profiles
             .iter()
@@ -453,5 +521,38 @@ mod tests {
         let back = toml::to_string(&p).unwrap();
         let reparsed: ProfilesDoc = toml::from_str(&back).unwrap();
         assert_eq!(p, reparsed);
+    }
+
+    /// `from_texts` and `load` share one layering path: the playground config
+    /// read from disk and the same files supplied in memory build identical configs.
+    #[test]
+    fn from_texts_matches_load() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../playground/config");
+        let mut texts = BTreeMap::new();
+        for name in Config::FILE_NAMES {
+            if let Ok(t) = std::fs::read_to_string(dir.join(name)) {
+                texts.insert(name.to_string(), t);
+            }
+        }
+        assert!(texts.contains_key("profiles.toml"));
+        let a = Config::load(&dir).unwrap();
+        let b = Config::from_texts(&texts).unwrap();
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+
+    #[test]
+    fn from_texts_empty_equals_missing_dir() {
+        let missing = std::env::temp_dir().join("wdmg-no-such-config-dir-xyz");
+        let a = Config::load(&missing).unwrap();
+        let b = Config::from_texts(&BTreeMap::new()).unwrap();
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+
+    #[test]
+    fn from_texts_names_the_bad_file() {
+        let mut texts = BTreeMap::new();
+        texts.insert("people.toml".to_string(), "persons = [[[".to_string());
+        let err = Config::from_texts(&texts).unwrap_err().to_string();
+        assert!(err.contains("people.toml"), "{err}");
     }
 }

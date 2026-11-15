@@ -1,0 +1,26 @@
+{
+  "name": "wdmg-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "wasm": "../scripts/build-wasm.sh",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "deploy": "yarn build && cp dist/index.html ../docs/index.html",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fflate": "0.8.2",
+    "idb-keyval": "6.2.5",
+    "uplot": "1.6.31"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.4",
+    "puppeteer-core": "25.1.0",
+    "typescript": "5.9.3",
+    "vite": "7.1.12",
+    "vite-plugin-singlefile": "2.3.0",
+    "vitest": "3.2.4"
+  }
+}

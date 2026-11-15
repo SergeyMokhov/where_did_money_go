@@ -14,28 +14,46 @@ pub fn strip_bom(s: &str) -> &str {
     s.strip_prefix(BOM).unwrap_or(s)
 }
 
-/// Read the header line and first `probe_rows` data lines from a file as text.
+/// Decode raw file bytes as UTF-8 text with any leading BOM stripped.
 ///
-/// Returns `(header_line, data_lines)`. The header has any BOM stripped. Blank
-/// lines are skipped when collecting probe rows so the detector sees real data
-/// even for sources with blank rows after the header.
-fn read_head(path: &Path, probe_rows: usize) -> Result<(String, Vec<String>), IngestError> {
-    let content = std::fs::read_to_string(path).map_err(|source| IngestError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let content = strip_bom(&content);
+/// Invalid UTF-8 is reported exactly like `std::fs::read_to_string` reports it
+/// (an `InvalidData` read error), so the fs and in-memory paths classify such
+/// files identically (skipped if not `.csv`, an error if `.csv`).
+pub fn decode<'b>(label: &Path, bytes: &'b [u8]) -> Result<&'b str, IngestError> {
+    std::str::from_utf8(bytes)
+        .map(strip_bom)
+        .map_err(|_| IngestError::Read {
+            path: label.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "stream did not contain valid UTF-8",
+            ),
+        })
+}
+
+/// How many leading data rows a `content_probe` may search. Generous because a
+/// distinguishing row can come late: a rewards card export often opens with
+/// several payment rows whose memo is empty before the first purchase.
+const PROBE_ROWS: usize = 200;
+
+/// Split the header line and first `probe_rows` data lines out of `content`.
+///
+/// Returns `(header_line, data_lines)`. Blank lines are skipped when collecting
+/// probe rows so the detector sees real data even for sources with blank rows
+/// after the header.
+fn read_head<'t>(
+    label: &Path,
+    content: &'t str,
+    probe_rows: usize,
+) -> Result<(&'t str, Vec<&'t str>), IngestError> {
+    let content = strip_bom(content);
     let mut lines = content.lines();
-    let header = lines
-        .next()
-        .ok_or_else(|| IngestError::EmptyHeader {
-            path: path.to_path_buf(),
-        })?
-        .to_string();
-    let data: Vec<String> = lines
+    let header = lines.next().ok_or_else(|| IngestError::EmptyHeader {
+        path: label.to_path_buf(),
+    })?;
+    let data: Vec<&str> = lines
         .filter(|l| !l.trim().is_empty())
         .take(probe_rows)
-        .map(str::to_string)
         .collect();
     Ok((header, data))
 }
@@ -54,7 +72,7 @@ fn first_cell(header: &str, delimiter: char) -> &str {
 fn rejection_reason(
     profile: &CompiledProfile,
     header: &str,
-    data: &[String],
+    data: &[&str],
     basename: &str,
 ) -> Option<String> {
     let delimiter = profile.profile.layout.delimiter.unwrap_or(',');
@@ -110,21 +128,35 @@ pub fn basename(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Select the first profile that matches `path`, or a typed error listing why
-/// each profile was rejected.
+/// Select the first profile that matches the file at `path`, or a typed error
+/// listing why each profile was rejected. Thin fs wrapper over [`detect_text`].
 pub fn detect<'c>(config: &'c Config, path: &Path) -> Result<&'c CompiledProfile, IngestError> {
-    let (header, data) = read_head(path, 5)?;
-    let base = basename(path);
+    let content = std::fs::read_to_string(path).map_err(|source| IngestError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    detect_text(config, path, &content)
+}
+
+/// Select the first profile that matches a file named `label` (its basename is
+/// matched against filename rules) whose decoded contents are `content`.
+pub fn detect_text<'c>(
+    config: &'c Config,
+    label: &Path,
+    content: &str,
+) -> Result<&'c CompiledProfile, IngestError> {
+    let (header, data) = read_head(label, content, PROBE_ROWS)?;
+    let base = basename(label);
 
     let mut reasons = Vec::new();
     for profile in &config.profiles {
-        match rejection_reason(profile, &header, &data, &base) {
+        match rejection_reason(profile, header, &data, &base) {
             None => return Ok(profile),
             Some(r) => reasons.push(r),
         }
     }
     Err(IngestError::NoProfileMatch {
-        path: path.to_path_buf(),
+        path: label.to_path_buf(),
         reasons: reasons.join("; "),
     })
 }

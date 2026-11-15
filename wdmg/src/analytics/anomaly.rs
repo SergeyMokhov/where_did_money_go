@@ -26,7 +26,8 @@
 //! `subscription_increase` (a recurring charge that stepped up), `card_testing` (a
 //! burst of tiny charges across ≥3 merchants).
 //!
-//! Time-series: `change_point` (a sustained shift in monthly spending),
+//! Time-series: `change_point` (a sustained shift in spending level, via the
+//! shared [`super::changepoint`] engine),
 //! `seasonal_residual` (a month high even for its season; recurring excluded,
 //! capped per category), `cashflow_runway` (a multi-month deficit streak).
 //!
@@ -52,7 +53,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use super::stats::{mad, mad_zscore, median, quartiles};
-use super::{month_key, Categorized};
+use super::{changepoint, month_key, Categorized};
 use crate::categorize::EffectiveKind;
 use crate::config::AnalysisSettings;
 use crate::model::Money;
@@ -255,7 +256,10 @@ fn mad_zscore_anomalies<'a>(
                         subcategory,
                         Money::new(med),
                     );
-                    cand.push((z, txn_anomaly("mad_zscore", c, med, format!("{z:.2}"), reason)));
+                    cand.push((
+                        z,
+                        txn_anomaly("mad_zscore", c, med, format!("{z:.2}"), reason),
+                    ));
                 }
             }
         }
@@ -963,75 +967,87 @@ fn benford_anomalies(items: &[Categorized<'_>]) -> Vec<Anomaly> {
 // Tier 3: change-point, seasonal residual, cash-flow runway
 // ---------------------------------------------------------------------------
 
-/// Monthly totals (sorted) of `mags` for items matching `kind`.
-fn monthly_totals(items: &[Categorized<'_>], kind: EffectiveKind) -> Vec<(String, Decimal)> {
-    let mut by_month: BTreeMap<String, Decimal> = BTreeMap::new();
+/// Daily spend series (cents/day, zero-filled) over the full period of `items`:
+/// `out` = Σ|amount| of spend rows, exactly the `total_outflow` definition.
+/// `None` when there is no spend or the period is out of the engine's range.
+fn daily_spend_series(items: &[Categorized<'_>]) -> Option<changepoint::DailySeries> {
+    let start = items.iter().map(|c| c.txn.date).min()?;
+    let end = items.iter().map(|c| c.txn.date).max()?;
+    let n = usize::try_from(day_diff(start, end)).ok()?.checked_add(1)?;
+    if n > changepoint::MAX_DAYS {
+        return None;
+    }
+    let mut daily = vec![0i64; n];
+    let mut any = false;
     for c in items {
-        if c.assignment.kind == kind {
-            *by_month
-                .entry(month_key(c.txn.date))
-                .or_insert(Decimal::ZERO) += c.txn.amount.amount().abs();
-        }
-    }
-    by_month.into_iter().collect()
-}
-
-/// A sustained shift in overall monthly spending (a regime change, not a one-month
-/// spike): the split that maximises the gap between the mean before and after, when
-/// that gap is ≥25% and each side has ≥3 months. Emits the single biggest change.
-fn change_point_anomalies(items: &[Categorized<'_>]) -> Vec<Anomaly> {
-    let series = monthly_totals(items, EffectiveKind::Spend);
-    if series.len() < 8 {
-        return Vec::new();
-    }
-    let vals: Vec<Decimal> = series.iter().map(|(_, v)| *v).collect();
-    let mean = |s: &[Decimal]| -> Decimal {
-        if s.is_empty() {
-            Decimal::ZERO
-        } else {
-            s.iter().copied().sum::<Decimal>() / Decimal::from(s.len() as u64)
-        }
-    };
-    let mut best: Option<(usize, Decimal, Decimal, f64)> = None; // (k, before, after, |rel|)
-    for k in 3..=series.len() - 3 {
-        let before = mean(&vals[..k]);
-        let after = mean(&vals[k..]);
-        if before.is_zero() {
+        if c.assignment.kind != EffectiveKind::Spend {
             continue;
         }
-        let rel = ((after - before) / before).to_f64().unwrap_or(0.0);
-        if best.is_none() || rel.abs() > best.unwrap().3 {
-            best = Some((k, before, after, rel.abs()));
-        }
+        let i = usize::try_from(day_diff(start, c.txn.date)).ok()?;
+        let cents = (c.txn.amount.amount().abs() * dec!(100)).round().to_i64()?;
+        daily[i] = daily[i].checked_add(cents)?;
+        any = true;
     }
-    let (k, before, after, rel) = match best {
-        Some(b) if b.3 >= 0.25 => b,
-        _ => return Vec::new(),
+    if !any {
+        return None;
+    }
+    changepoint::DailySeries::new(start, daily, changepoint::Metric::Out).ok()
+}
+
+/// Cents/day → a per-month [`Money`] (× 365.25/12), rounded to the cent.
+fn per_month(level_per_day: f64) -> Money {
+    let cents = Decimal::from_f64(level_per_day * 365.25 / 12.0)
+        .unwrap_or(Decimal::ZERO)
+        .round();
+    Money::new(cents / dec!(100))
+}
+
+/// Sustained shifts in overall spending (regime changes, not one-off spikes),
+/// from the shared change-point engine ([`changepoint`], metric `out`, standard
+/// sensitivity) — the same engine the browser chart runs, so the list and the
+/// chart agree. One anomaly per confirmed change, anchored at its first day.
+fn change_point_anomalies(items: &[Categorized<'_>]) -> Vec<Anomaly> {
+    let Some(series) = daily_spend_series(items) else {
+        return Vec::new();
     };
-    let month = series[k].0.clone();
-    let dir = if after > before { "up" } else { "down" };
-    let reason = format!(
-        "Monthly spending shifted {} around {}: from ~{}/mo to ~{}/mo ({:+.0}%)",
-        dir,
-        month,
-        Money::new(before),
-        Money::new(after),
-        rel * 100.0 * if after > before { 1.0 } else { -1.0 },
-    );
-    vec![Anomaly {
-        method: "change_point".into(),
-        scope: "month".into(),
-        category: String::new(),
-        subcategory: None,
-        period_or_date: month,
-        amount: Money::new(after),
-        baseline: Money::new(before),
-        severity: format!("{:.2}", rel),
-        reason,
-        merchant: None,
-        person: None,
-        account: None,
-    }]
+    let Ok(result) = changepoint::detect(&series, changepoint::Options::default()) else {
+        return Vec::new();
+    };
+    result
+        .changes
+        .iter()
+        .zip(result.segments.windows(2))
+        .map(|(change, seg)| {
+            let (before, after) = (seg[0].level_per_day, seg[1].level_per_day);
+            let rel = if before > 0.0 {
+                (after - before) / before
+            } else {
+                0.0
+            };
+            let (b, a) = (per_month(before), per_month(after));
+            let dir = if after > before { "up" } else { "down" };
+            Anomaly {
+                method: "change_point".into(),
+                scope: "month".into(),
+                category: String::new(),
+                subcategory: None,
+                period_or_date: change.date.to_string(),
+                amount: a,
+                baseline: b,
+                severity: format!("{:.2}", rel.abs()),
+                reason: format!(
+                    "Spending shifted {dir} from {}: ~{}/mo before, ~{}/mo after ({:+.0}%)",
+                    change.date,
+                    b,
+                    a,
+                    rel * 100.0
+                ),
+                merchant: None,
+                person: None,
+                account: None,
+            }
+        })
+        .collect()
 }
 
 /// Season-adjusted month outliers: a month that's high **even for that time of
@@ -1590,5 +1606,47 @@ mod tests {
             a.iter().any(|x| x.method == "cashflow_runway"),
             "a multi-month deficit streak should be flagged, got: {a:?}"
         );
+    }
+
+    /// ~$40/day of spend for 20 weeks, then ~$90/day for 20 weeks: one confirmed
+    /// upward shift, anchored where the new level starts, with per-month levels.
+    #[test]
+    fn change_point_flags_a_sustained_spending_shift() {
+        let start = date(2026, 1, 5);
+        let mut pairs = vec![];
+        for i in 0..280i64 {
+            let base = if i < 140 { 40 } else { 90 };
+            // Small deterministic wobble so the noise scale is non-zero.
+            let amt = format!("-{}.{:02}", base + (i * 7) % 5, (i * 13) % 100);
+            pairs.push(spend("Food", &amt, start + jiff::Span::new().days(i)));
+        }
+        let a = change_point_anomalies(&view(&pairs));
+        assert_eq!(a.len(), 1, "{a:?}");
+        let cp = &a[0];
+        assert_eq!(cp.method, "change_point");
+        assert_eq!(cp.scope, "month");
+        assert_eq!(cp.period_or_date, "2026-05-25"); // day 140
+        assert!(cp.amount.amount() > cp.baseline.amount() * dec!(2));
+        assert!(cp.reason.contains("up"));
+    }
+
+    /// Stable spend with a single one-off splurge is not a regime change.
+    #[test]
+    fn change_point_ignores_a_one_off_splurge() {
+        let start = date(2026, 1, 5);
+        let mut pairs = vec![];
+        for i in 0..280i64 {
+            let amt = format!("-{}.{:02}", 40 + (i * 7) % 5, (i * 13) % 100);
+            pairs.push(spend("Food", &amt, start + jiff::Span::new().days(i)));
+        }
+        pairs.push(spend(
+            "Travel",
+            "-5000.00",
+            start + jiff::Span::new().days(100),
+        ));
+        let got = change_point_anomalies(&view(&pairs));
+        assert!(got.is_empty(), "{got:#?}");
+        // No spend at all: nothing to report.
+        assert!(change_point_anomalies(&[]).is_empty());
     }
 }

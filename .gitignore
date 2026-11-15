@@ -1,5 +1,9 @@
 # Rust build artifacts
 /wdmg/target/
+/wdmg-wasm/target/
+
+# Generated WebAssembly module + JS glue (scripts/build-wasm.sh)
+web/src/wasm/
 
 # Generated working-dir artifacts (should never live in the repo)
 analysis.json
@@ -23,3 +27,6 @@ report.html
 # Editor / OS cruft
 *.swp
 .DS_Store
+
+# Personal, never-commit files (e.g. your real config bundle for the browser app)
+/private/

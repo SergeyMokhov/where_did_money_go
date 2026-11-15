@@ -39,7 +39,26 @@ pub struct AnalyzeOutcome {
 pub fn analyze(config: &Config, input_dir: &Path) -> Result<AnalyzeOutcome, WdmgError> {
     // 1. Ingest.
     let (txns, load_report) = ingest::load_dir(config, input_dir)?;
+    analyze_txns(config, txns, load_report)
+}
 
+/// Run the full analyze pipeline over in-memory `(file name, contents)` pairs —
+/// the browser/WebAssembly entry point. Identical to [`analyze`] except for where
+/// the bytes come from (see [`ingest::load_files`]); touches no filesystem.
+pub fn analyze_files(
+    config: &Config,
+    files: &[(String, Vec<u8>)],
+) -> Result<AnalyzeOutcome, WdmgError> {
+    let (txns, load_report) = ingest::load_files(config, files);
+    analyze_txns(config, txns, load_report)
+}
+
+/// Stages 2..8, shared by [`analyze`] and [`analyze_files`] so they cannot drift.
+fn analyze_txns(
+    config: &Config,
+    txns: Vec<crate::model::Transaction>,
+    load_report: ingest::LoadReport,
+) -> Result<AnalyzeOutcome, WdmgError> {
     // 2. Dedup (sets stable dedup_key, returns kept rows + report).
     let (mut txns, dedup_report) = dedup::dedup(txns);
 
@@ -131,6 +150,37 @@ mod tests {
             out1.analysis.analytics.flows.total_outflow.amount(),
             rust_decimal_macros::dec!(76.99)
         );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn analyze_files_matches_analyze_dir() {
+        let cfg = Config::from_defaults().unwrap();
+        let tmp = std::env::temp_dir().join(format!("wdmg-pipe-mem-{}", std::process::id()));
+        let input = tmp.join("in");
+        std::fs::create_dir_all(&input).unwrap();
+        write_temp(&input, "7001 xxxx xxxx 7003.CSV", pc_csv());
+        write_temp(&input, "notes.txt", "not a statement");
+
+        let from_dir = analyze(&cfg, &input).unwrap();
+        // Supply the files in reverse order: load_files must sort by name.
+        let files = vec![
+            ("notes.txt".to_string(), b"not a statement".to_vec()),
+            (
+                "7001 xxxx xxxx 7003.CSV".to_string(),
+                pc_csv().as_bytes().to_vec(),
+            ),
+        ];
+        let from_mem = analyze_files(&cfg, &files).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&from_dir.analysis).unwrap(),
+            serde_json::to_string(&from_mem.analysis).unwrap()
+        );
+        assert_eq!(from_dir.load_report.loaded, from_mem.load_report.loaded);
+        assert_eq!(from_dir.load_report.skipped, from_mem.load_report.skipped);
+        assert_eq!(from_mem.load_report.skipped, vec!["notes.txt".to_string()]);
 
         std::fs::remove_dir_all(&tmp).ok();
     }

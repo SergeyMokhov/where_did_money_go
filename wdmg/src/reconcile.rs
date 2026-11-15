@@ -60,6 +60,10 @@ pub struct External {
     pub amount: Money,
     /// Leg date.
     pub date: String,
+    /// `true` when money came IN to `from_account` from `to` (a deposit leg);
+    /// `false` when it went out to `to`. `amount` is absolute either way.
+    #[serde(default)]
+    pub incoming: bool,
 }
 
 /// A transfer leg that could neither be paired nor assigned.
@@ -147,28 +151,68 @@ fn node_of(c: &Categorized<'_>) -> String {
         .unwrap_or_else(|| "unassigned".into())
 }
 
+/// Card side of a card payment, as issuers word it: "PAYMENT - THANK YOU",
+/// "Payment Thank You-Mobile", "AUTOPAY", "PAIEMENT - MERCI", "PYMT RECEIVED".
+static CARD_PAYMENT_IN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    // INVARIANT: constant pattern, covered by tests; always compiles.
+    #[allow(clippy::expect_used)]
+    regex::Regex::new(r"(?i)\b(PAYMENTS?|PAIEMENT|PYMT|PMT|AUTO ?PAY|THANK YOU|MERCI)\b")
+        .expect("card-payment-in regex")
+});
+
+/// Bank side of a card payment: a payment word ("Bill Payment", "EPAYMENT",
+/// "Mobile Pmt", "Web Pymt", "AUTOPAY") or a card-network / card-product word
+/// ("VISA", "MASTERCARD", "AMERICAN EXPRESS", "Credit Card Payment", "LOC").
+/// Deliberately names no bank: issuers differ, these words don't.
+static CARD_PAYMENT_OUT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    // INVARIANT: constant pattern, covered by tests; always compiles.
+    #[allow(clippy::expect_used)]
+    regex::Regex::new(
+        r"(?i)(\b(PAYMENTS?|PAIEMENT|PYMT|PMT|E-?PAYMENT|AUTO ?PAY|BILL ?PAY)|\b(VISA|MASTER ?CARD|AMEX|AMERICAN EXPRESS|DISCOVER|DINERS|CREDIT CARD|CARTE DE CR[EÉ]DIT|LOC)\b)",
+    )
+    .expect("card-payment-out regex")
+});
+
+/// Whether a leg lands on a credit card, from config alone: the account's
+/// `kind` in people.toml, or the statement format's `[profile.account] kind`.
+fn is_card(leg: &Leg<'_>, config: &Config) -> bool {
+    let card = |k: &str| k.to_ascii_lowercase().contains("credit");
+    let by_account = config
+        .people
+        .persons
+        .iter()
+        .flat_map(|p| p.accounts.iter())
+        .any(|a| a.id == leg.node && card(&a.kind));
+    by_account
+        || config
+            .profiles
+            .iter()
+            .any(|p| p.profile.id == leg.item.txn.profile_id && card(&p.profile.account.kind))
+}
+
 /// Confidence that two legs are the same internal move. Higher is better.
 ///
 /// Base 0.5 for the structural match (equal magnitude, opposite sign, within the
-/// day window). Bonuses for: a credit-card "PAYMENT - THANK YOU" inflow against a
-/// payment outflow, the description on one side naming the other side's owner,
-/// and same-day timing.
+/// day window). Bonuses for: a card-payment wording on both sides, the inflow
+/// landing on a credit-card account, the description on one side naming the
+/// other side's owner, and same-day timing.
 fn confidence(out: &Leg<'_>, inflow: &Leg<'_>, config: &Config) -> f64 {
     let mut score = 0.5f64;
 
     let in_desc = inflow.desc().to_uppercase();
     let out_desc = out.desc().to_uppercase();
 
-    // CC payment heuristic.
-    if in_desc.contains("PAYMENT - THANK YOU") || in_desc.contains("PAYMENT") {
-        if out_desc.contains("PAYMENT")
-            || out_desc.contains("PC FINANCIAL")
-            || out_desc.contains("MASTERCARD")
-        {
-            score += 0.3;
+    // Card-payment wording: strong when both sides read like one.
+    if CARD_PAYMENT_IN.is_match(&in_desc) {
+        score += if CARD_PAYMENT_OUT.is_match(&out_desc) {
+            0.3
         } else {
-            score += 0.1;
-        }
+            0.1
+        };
+    }
+    // Paying a card you declared as one is likely whatever the bank calls it.
+    if is_card(inflow, config) {
+        score += 0.1;
     }
 
     // Description names the counterparty's owner display name.
@@ -302,6 +346,7 @@ pub fn reconcile(items: &[Categorized<'_>], config: &Config, roster: &Roster) ->
                 to: r.rule.to.clone(),
                 amount: Money::new(leg.amount.abs()),
                 date: leg.date().to_string(),
+                incoming: leg.amount.is_sign_positive() && !leg.amount.is_zero(),
             }),
             None => unresolved.push(Unresolved {
                 account: leg.node.clone(),
@@ -356,9 +401,13 @@ fn build_graph(matched: &[MatchedPair], external: &[External], roster: &Roster) 
         e.1 += 1;
     }
     for x in external {
-        let e = edges
-            .entry((x.from_account.clone(), x.to.clone()))
-            .or_insert((Decimal::ZERO, 0));
+        // Edges point the way the money moved.
+        let key = if x.incoming {
+            (x.to.clone(), x.from_account.clone())
+        } else {
+            (x.from_account.clone(), x.to.clone())
+        };
+        let e = edges.entry(key).or_insert((Decimal::ZERO, 0));
         e.0 += x.amount.amount();
         e.1 += 1;
     }
@@ -518,6 +567,40 @@ mod tests {
     }
 
     #[test]
+    fn card_payment_wording_is_bank_agnostic() {
+        for out in [
+            "Bill Payment - SOME BANK MASTERCARD",
+            "Some Bank Credit Card Payment",
+            "AMEX EPAYMENT ACH PMT",
+            "CARD MOBILE PMT",
+            "WEB PYMT",
+            "VISA PREAUTH PYMT",
+            "MB-CREDIT CARD/LOC PAY.",
+            "AUTOPAY",
+        ] {
+            assert!(CARD_PAYMENT_OUT.is_match(out), "out: {out}");
+        }
+        for inn in [
+            "PAYMENT - THANK YOU",
+            "Payment Thank You-Mobile",
+            "AUTOPAY THANK YOU",
+            "PAIEMENT - MERCI",
+            "ONLINE PAYMENT, THANK YOU",
+        ] {
+            assert!(CARD_PAYMENT_IN.is_match(inn), "in: {inn}");
+        }
+        // Ordinary transfers and purchases don't read as card payments.
+        for not in [
+            "TRANSFER TO SAVINGS",
+            "GROCERY MART",
+            "PAYROLL ACME",
+            "LOCAL CAFE",
+        ] {
+            assert!(!CARD_PAYMENT_OUT.is_match(not), "out false positive: {not}");
+        }
+    }
+
+    #[test]
     fn external_assignment_by_rule() {
         let cfg = Config::from_defaults().unwrap();
         let roster = Roster::from_config(&cfg);
@@ -532,7 +615,63 @@ mod tests {
         let r = reconcile(&view(&pairs), &cfg, &roster);
         assert_eq!(r.external.len(), 1);
         assert_eq!(r.external[0].to, "spouse_savings");
+        assert!(!r.external[0].incoming);
         assert!(r.unresolved.is_empty());
+    }
+
+    #[test]
+    fn external_deposit_points_into_the_account() {
+        let cfg = Config::from_defaults().unwrap();
+        let roster = Roster::from_config(&cfg);
+        // Money coming back FROM the external savings account.
+        let legs = vec![
+            leg(
+                "EFT Withdrawal to TFSA SAVINGS",
+                "-500.00",
+                "ledger_debit",
+                "me",
+                date(2026, 1, 5),
+            ),
+            leg(
+                "Transfer to TFSA SAVINGS - RETURNED",
+                "200.00",
+                "ledger_debit",
+                "me",
+                date(2026, 2, 5),
+            ),
+        ];
+        let r = reconcile(&view(&legs), &cfg, &roster);
+        assert_eq!(r.external.len(), 2, "{:?}", r.unresolved);
+        let inc: Vec<bool> = r.external.iter().map(|x| x.incoming).collect();
+        assert!(inc.contains(&true) && inc.contains(&false));
+        let dirs: Vec<(String, String, String)> = r
+            .graph
+            .edges
+            .iter()
+            .map(|e| {
+                (
+                    e.from.clone(),
+                    e.to.clone(),
+                    e.net_amount.amount().to_string(),
+                )
+            })
+            .collect();
+        assert!(
+            dirs.contains(&(
+                "spouse_savings".into(),
+                "ledger_debit".into(),
+                "200.00".into()
+            )),
+            "{dirs:?}"
+        );
+        assert!(
+            dirs.contains(&(
+                "ledger_debit".into(),
+                "spouse_savings".into(),
+                "500.00".into()
+            )),
+            "{dirs:?}"
+        );
     }
 
     #[test]

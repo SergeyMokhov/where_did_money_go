@@ -181,3 +181,161 @@ fn missing_column_is_a_typed_error_not_a_panic() {
         "expected missing-column error, got: {msg}"
     );
 }
+
+#[test]
+fn rewards_card_export_with_only_a_payment_is_detected() {
+    // A real export can hold a single payment row with an empty memo, so the
+    // profile must not depend on the "Rewards earned ~ Category:" memo.
+    let csv = "Transaction date,Transaction,Name,Memo,Amount\n\
+               03/02/2026,CREDIT,PAYMENT - THANK YOU,,54.10\n";
+    let cfg = cfg();
+    let p = wdmg::ingest::detect_text(&cfg, Path::new("1234 xxxx xxxx 5678.CSV"), csv)
+        .expect("detected");
+    assert_eq!(p.profile.id, "rewards_credit");
+}
+
+/// Defaults plus one extra profile appended (as the browser's column mapper does).
+fn cfg_with(extra: &str) -> Result<Config, wdmg::error::ConfigError> {
+    let mut texts = std::collections::BTreeMap::new();
+    texts.insert(
+        "profiles.toml".to_string(),
+        format!("{}\n{extra}", wdmg::config::defaults::profiles()),
+    );
+    Config::from_texts(&texts)
+}
+
+const MAPPED: &str = r#"
+[[profile]]
+id = "mapped_card"
+[profile.match]
+header_first_cell = 'Posted'
+header_contains   = ["Posted", "Details", "Value"]
+[profile.date]
+column  = "Posted"
+formats = ["%Y-%m-%d"]
+[profile.amount]
+column = "Value"
+sign   = "outflow_positive"
+[profile.merchant]
+column = "Details"
+[profile.type.by_sign]
+negative = "spend"
+positive = "transfer"
+[profile.account]
+kind     = "credit_card"
+currency = "CAD"
+"#;
+
+#[test]
+fn profile_without_type_column_classifies_by_sign() {
+    let cfg = cfg_with(MAPPED).expect("mapped profile builds");
+    let csv = "Posted,Details,Value\n2026-11-01,COFFEE,4.50\n2026-11-02,PAYMENT,-100.00\n";
+    let txns =
+        wdmg::ingest::load_bytes(&cfg, Path::new("card.csv"), csv.as_bytes()).expect("parses");
+    assert_eq!(txns[0].profile_id, "mapped_card");
+    // outflow_positive: 4.50 is money out -> spend; -100 is money in -> transfer.
+    assert_eq!(txns[0].txn_type, TxnType::Spend);
+    assert!(txns[0].amount.amount().is_sign_negative());
+    assert_eq!(txns[1].txn_type, TxnType::Transfer);
+}
+
+#[test]
+fn by_sign_rejects_unknown_kinds() {
+    let bad = MAPPED.replace("positive = \"transfer\"", "positive = \"refund\"");
+    let err = cfg_with(&bad).unwrap_err().to_string();
+    assert!(err.contains("by_sign") && err.contains("refund"), "{err}");
+}
+
+fn cfg_profiles_only(text: &str) -> Config {
+    let mut texts = std::collections::BTreeMap::new();
+    texts.insert("profiles.toml".to_string(), text.to_string());
+    Config::from_texts(&texts).expect("config builds")
+}
+
+#[test]
+fn user_profiles_add_to_builtins() {
+    // A profiles.toml holding only a mapped format still recognises built-ins.
+    let cfg = cfg_profiles_only(&format!("schema_version = 1\n{MAPPED}"));
+    assert_eq!(cfg.profiles[0].profile.id, "mapped_card");
+    let card_export = "Transaction date,Transaction,Name,Memo,Amount\n\
+                     03/02/2026,CREDIT,PAYMENT - THANK YOU,,54.10\n";
+    let p = wdmg::ingest::detect_text(&cfg, Path::new("x.csv"), card_export).expect("built-in");
+    assert_eq!(p.profile.id, "rewards_credit");
+}
+
+#[test]
+fn user_profile_overrides_builtin_with_same_id() {
+    let over = MAPPED.replace("id = \"mapped_card\"", "id = \"rewards_credit\"");
+    let cfg = cfg_profiles_only(&format!("schema_version = 1\n{over}"));
+    let n = cfg
+        .profiles
+        .iter()
+        .filter(|p| p.profile.id == "rewards_credit")
+        .count();
+    assert_eq!(n, 1, "the user's copy replaces the built-in");
+    assert_eq!(cfg.profiles[0].profile.date.column, "Posted");
+}
+
+const MULTI_DESC: &str = r#"
+[[profile]]
+id = "some_bank_savings"
+[profile.match]
+header_first_cell = 'ID'
+header_contains   = ["ID", "Date", "Account Name", "Description1", "Description2", "Description3", "Amount", "Balance"]
+[profile.date]
+column  = "Date"
+formats = ["%Y-%m-%d", "%Y-%-m-%-d"]
+[profile.amount]
+column = "Amount"
+sign   = "signed"
+[profile.merchant]
+column = "Description1"
+extra_columns = ["Description2", "Description3"]
+[profile.type.by_sign]
+negative = "spend"
+positive = "income"
+[profile.account]
+kind     = "debit"
+currency = "CAD"
+"#;
+
+#[test]
+fn dates_with_a_time_suffix_and_multi_column_descriptions() {
+    let cfg = cfg_with(MULTI_DESC).expect("profile builds");
+    let csv = "ID,Date,Account Name,Description1,Description2,Description3,Amount,Balance\n\
+               1001,2026-03-31 12:00:00 AM,Savings - 0,\"Interest Credit\",\"Interest Amount 0.07\",,0.07,140.07\n\
+               1002,2026-11-02T08:15:00Z,Savings - 0,Transfer out,,ref 77,-5.00,135.07\n\
+               1003,2026-11-03,Savings - 0,Plain,,,1.00,21.94\n";
+    let t =
+        wdmg::ingest::load_bytes(&cfg, Path::new("savings.csv"), csv.as_bytes()).expect("parses");
+    assert_eq!(t.len(), 3);
+    assert_eq!(t[0].date.to_string(), "2026-03-31");
+    assert_eq!(t[1].date.to_string(), "2026-11-02");
+    assert_eq!(t[0].raw_description, "Interest Credit Interest Amount 0.07");
+    assert_eq!(t[1].raw_description, "Transfer out ref 77");
+    assert_eq!(t[2].raw_description, "Plain");
+    assert_eq!(t[0].txn_type, TxnType::Income);
+}
+
+#[test]
+fn a_time_suffix_never_rescues_a_bad_date() {
+    let cfg = cfg_with(MULTI_DESC).expect("profile builds");
+    let csv = "ID,Date,Account Name,Description1,Description2,Description3,Amount,Balance\n\
+               1,2026-13-31 12:00:00 AM,S,X,,,1.00,1\n";
+    assert!(wdmg::ingest::load_bytes(&cfg, Path::new("s.csv"), csv.as_bytes()).is_err());
+}
+
+#[test]
+fn split_description_ledger_is_a_builtin_format() {
+    let cfg = wdmg::config::Config::from_defaults().expect("defaults");
+    let csv = " ID, Date, Account Name, Description1, Description2, Description3, Amount, Balance\n\
+               100000001,2026-03-31 12:00:00 AM,Savings - 0,\"Interest Credit\",\"Interest Amount 0.07\",,0.07,140.07\n\
+               100000002,2026-11-02 12:00:00 AM,Savings - 0,\"Transfer Out\",\"To chequing\",,-5.00,135.07\n";
+    let t = wdmg::ingest::load_bytes(&cfg, Path::new("download.csv"), csv.as_bytes())
+        .expect("recognised");
+    assert_eq!(t[0].profile_id, "split_description_ledger");
+    assert_eq!(t[0].date.to_string(), "2026-03-31");
+    assert_eq!(t[0].raw_description, "Interest Credit Interest Amount 0.07");
+    assert_eq!(t[0].txn_type, TxnType::Income);
+    assert_eq!(t[1].txn_type, TxnType::Spend);
+}

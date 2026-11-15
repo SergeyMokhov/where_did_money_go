@@ -13,6 +13,6 @@ fn written_defaults_reload() {
     std::fs::write(dir.join("people.toml"), defaults::people()).unwrap();
 
     let cfg = Config::load(Path::new(&dir)).expect("written config must reload");
-    assert_eq!(cfg.profiles.len(), 4);
+    assert_eq!(cfg.profiles.len(), 5);
     assert!(!cfg.transfer_rules.is_empty());
 }

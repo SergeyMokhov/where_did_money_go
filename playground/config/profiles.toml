@@ -1,6 +1,6 @@
 # where-did-money-go — PLAYGROUND source profiles
 #
-# Identical to the shipped defaults — the playground exports use the four standard
+# Identical to the shipped defaults — the playground exports use the standard
 # layouts. See assets/default_profiles.toml for full field documentation.
 
 schema_version = 1
@@ -32,7 +32,9 @@ id_from_filename = '(\d{4})'
 id = "rewards_credit"
 [profile.match]
 header_first_cell = "Transaction date"
-content_probe     = 'Rewards earned:.*Category:'
+# Matched on headers alone: an export can hold only payments (empty memo), so
+# requiring the "Rewards earned ~ Category:" memo would reject it.
+header_contains   = ["Transaction", "Name", "Memo", "Amount"]
 [profile.date]
 column  = "Transaction date"
 formats = ["%m/%d/%Y", "%-m/%-d/%Y"]
@@ -99,3 +101,26 @@ map    = { DEBIT = "spend", CREDIT = "income" }
 kind     = "debit"
 currency = "CAD"
 id_from_filename = '(\d{4})'
+
+[[profile]]
+id = "split_description_ledger"
+[profile.match]
+header_first_cell = "ID"
+header_contains   = [" Date", " Account Name", " Description1", " Description2", " Description3", " Amount", " Balance"]
+[profile.date]
+column  = " Date"
+formats = ["%Y-%m-%d", "%Y-%-m-%-d"]
+[profile.amount]
+column = " Amount"
+sign   = "signed"
+[profile.merchant]
+column        = " Description1"
+extra_columns = [" Description2", " Description3"]
+# No transaction-type column: classify by sign; categorization/transfer rules
+# can still re-label a row (e.g. a transfer between your own accounts).
+[profile.type.by_sign]
+negative = "spend"
+positive = "income"
+[profile.account]
+kind     = "debit"
+currency = "CAD"

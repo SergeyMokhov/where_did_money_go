@@ -1,0 +1,28 @@
+[package]
+name = "wdmg-wasm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+description = "WebAssembly bindings for the wdmg statement-analysis pipeline"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# A standalone crate with a path dependency (not a workspace member) so the CLI
+# keeps its own target dir/lockfile/profile and `scripts/build.sh` is unchanged.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wdmg = { path = "../wdmg" }
+# Must match the installed `wasm-bindgen` CLI exactly (`wasm-bindgen --version`).
+wasm-bindgen = "=0.2.108"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

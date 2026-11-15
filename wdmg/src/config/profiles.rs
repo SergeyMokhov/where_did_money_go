@@ -20,6 +20,19 @@ pub struct ProfilesDoc {
     pub profiles: Vec<Profile>,
 }
 
+impl ProfilesDoc {
+    /// `self`'s profiles first (in order), followed by each profile of `base`
+    /// whose id `self` does not define.
+    #[must_use]
+    pub fn layered_over(mut self, base: ProfilesDoc) -> ProfilesDoc {
+        let mine: std::collections::HashSet<String> =
+            self.profiles.iter().map(|p| p.id.clone()).collect();
+        self.profiles
+            .extend(base.profiles.into_iter().filter(|p| !mine.contains(&p.id)));
+        self
+    }
+}
+
 fn default_schema_version() -> u32 {
     1
 }
@@ -47,8 +60,9 @@ pub struct Profile {
     /// Optional memo column + category harvest.
     #[serde(default)]
     pub memo: Option<MemoSpec>,
-    /// Transaction-type column + value map.
-    #[serde(rename = "type")]
+    /// Transaction-type column + value map. Optional: a source with no type
+    /// column can classify rows by the amount's sign instead (`by_sign`).
+    #[serde(rename = "type", default)]
     pub type_spec: TypeSpec,
     /// Optional person/cardholder column.
     #[serde(default)]
@@ -122,6 +136,13 @@ pub struct DateSpec {
     pub formats: Vec<String>,
 }
 
+impl MerchantSpec {
+    /// Every description column, primary first.
+    pub fn columns(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.column.as_str()).chain(self.extra_columns.iter().map(String::as_str))
+    }
+}
+
 impl DateSpec {
     /// All formats to try, in order (single `format` first, then `formats`).
     #[must_use]
@@ -167,6 +188,10 @@ pub struct AmountSpec {
 pub struct MerchantSpec {
     /// Column carrying the merchant/description.
     pub column: String,
+    /// More description columns (e.g. `Description2`, `Description3`). Their
+    /// non-empty cells are appended to `column`'s, space-separated, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_columns: Vec<String>,
     /// Optional regex matching a code prefix to strip (e.g. `[CW]`).
     #[serde(default)]
     pub strip_codes: Option<String>,
@@ -186,13 +211,29 @@ pub struct MemoSpec {
 }
 
 /// Transaction-type column + mapping (`[profile.type]`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TypeSpec {
-    /// Column carrying the raw type value.
-    pub column: String,
-    /// Raw value -> `spend|income|transfer`. Unmapped values become `Unknown`.
+    /// Column carrying the raw type value, if the source has one.
+    #[serde(default)]
+    pub column: Option<String>,
+    /// Raw value -> `spend|income|transfer`. Unmapped values fall back to
+    /// `by_sign` when given, else become `Unknown`.
     #[serde(default)]
     pub map: BTreeMap<String, String>,
+    /// Kind for rows the column/map does not classify, chosen by the amount's
+    /// sign (after sign normalisation: negative = money out).
+    #[serde(default)]
+    pub by_sign: Option<BySign>,
+}
+
+/// Sign-based fallback kinds (`[profile.type.by_sign]`), each
+/// `spend|income|transfer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BySign {
+    /// Kind for money out (negative amounts).
+    pub negative: String,
+    /// Kind for money in (positive amounts).
+    pub positive: String,
 }
 
 /// Person/cardholder column (`[profile.person]`).

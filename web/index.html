@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where Did Money Go?</title>
+<script type="module" src="./src/main.ts"></script>
+</head>
+<body>
+<div id="boot" class="boot">Loading the analysis engine…</div>
+<div id="report-root" hidden>
+
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Where Did Money Go? Your Financial Dashboard</h1>
+      <div class="sub">
+        <span id="period-sub"></span> · <span id="currency-sub"></span>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="proj-name" id="proj-name" title="Active project"></span>
+      <button class="btn" id="config-open" type="button">⚙ Configuration</button>
+      <button class="btn" id="theme-toggle" type="button">◐ Theme</button>
+    </div>
+  </header>
+
+  <div class="summary" id="summary" hidden></div>
+
+  <!-- Filter bar (populated by the glue script from the transaction island) -->
+  <div class="filters-sec" id="filters-sec" data-yank-title="Filters">
+    <div class="filterbar" id="filterbar"></div>
+    <div class="activebar" id="activebar"></div>
+  </div>
+
+  <!-- Headline numbers -->
+  <div class="cards" id="cards"></div>
+
+  <!-- Cash flow over time -->
+  <h2>Cash flow over time <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money in (green), out (red) and net (blue) per period. Buckets = Auto lets the chart pick its own resolution (down to daily when you zoom in); or pin it to Weekly / Bi-weekly / Monthly. The dashed line is a rolling-average baseline. Life events are overlaid — each in its own colour — so you can see how a milestone lined up with your money: a single date shows as a vertical marker, a date range as a shaded band (e.g. a renovation or a stretch between jobs). Click an event under the chart to hide or show it. Unusual-activity flags are auto-tagged along the top edge (a diamond for a dated flag, a short bar for a month or streak, coloured by severity) and follow the current lens and filters; toggle them under the chart. What to watch: periods where Out jumps above the baseline, and any period where Net dips below zero (you spent more than you earned). Tip: drag across the chart to filter every section to that date range. View = Change points splits Net, In and Out into separate charts of steady LEVELS: grey dots are the raw buckets, the stepped line is the level the Rust engine detected (with its 95% band), and each +N / −N mark is how much the level moved per bucket — green when it is good for your money, red when not. A red ring flags a bucket unusually high or low for its level. A new level is only declared once it has lasted the configured number of days (default 14); a shift still forming shows as a dashed tentative level. Standard ignores small shifts, Sensitive reports them.">i</span></h2>
+  <div class="panel">
+    <div class="chart-toolbar">
+      <div class="tb-group">
+        <div class="tb-cap">Period</div>
+        <div class="seg" id="range-buttons">
+          <button class="btn active" data-range="all" type="button">All</button>
+          <button class="btn" data-range="12" type="button">12 mo</button>
+          <button class="btn" data-range="ytd" type="button">YTD</button>
+        </div>
+      </div>
+      <div class="tb-group">
+        <div class="tb-cap">Buckets <span id="cashflow-res" class="tb-note"></span></div>
+        <div class="seg" id="gran-buttons">
+          <button class="btn active" data-gran="auto" type="button">Auto</button>
+          <button class="btn" data-gran="week" type="button">Weekly</button>
+          <button class="btn" data-gran="biweek" type="button">Bi-weekly</button>
+          <button class="btn" data-gran="month" type="button">Monthly</button>
+        </div>
+      </div>
+      <div class="tb-group">
+        <div class="tb-cap">View</div>
+        <div class="seg" id="view-buttons">
+          <button class="btn active" data-view="raw" type="button">Raw buckets</button>
+          <button class="btn" data-view="cp" type="button">Change points</button>
+        </div>
+      </div>
+      <div class="tb-group cp-controls" id="cp-controls" style="display:none;">
+        <div class="tb-cap">Change detection</div>
+        <div class="tb-row">
+          <div class="seg">
+            <button class="btn active" data-sens="standard" type="button" title="Only clear, sustained shifts">Standard</button>
+            <button class="btn" data-sens="sensitive" type="button" title="Also smaller shifts (more marks, more false alarms)">Sensitive</button>
+          </div>
+          <label class="muted cp-mindays">new level after
+            <input type="number" id="cp-min-days" min="7" max="365" step="1" value="14"> days</label>
+        </div>
+      </div>
+    </div>
+    <div id="cashflow-chart"></div>
+    <div id="cp-charts" style="display:none;"></div>
+    <div class="muted" style="font-size:12px;margin-top:6px;">Tip: drag across the chart to filter every section (and the Transactions window) to that date range; click a dot to list that period’s transactions.</div>
+    <div class="empty" id="cashflow-empty" style="display:none;">No data in the current selection.</div>
+    <!-- Life events: labelled vertical markers on the chart (populated by the glue script). -->
+    <div id="events-ui" class="events-ui"></div>
+  </div>
+
+  <div class="grid2">
+    <!-- Spend by category -->
+    <div>
+      <h2 class="sec-h">Where it went <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Your spending grouped by category; each bar is split into its subcategories. Longer bar = more spent. Click a category or subcategory to see the transactions behind it in the Transactions window (bottom right); ▾ collapses a category. What to watch: the one or two categories that dominate — that's where small cuts add up fastest.">i</span></h2>
+      <div class="panel"><div class="bars" id="spend-bars"></div></div>
+    </div>
+
+    <!-- Income by source -->
+    <div>
+      <h2 class="sec-h">Where it came from <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Where your money came in from, by source. What to watch: how much you rely on a single source, and any one-off inflows (a refund, a sale, an inheritance) that won't repeat next month. Click a category or subcategory to see the transactions behind it in the Transactions window (bottom right).">i</span></h2>
+      <div class="panel" id="income-panel"></div>
+    </div>
+  </div>
+
+  <!-- Money between accounts/people -->
+  <h2 class="sec-h">Money between your accounts &amp; people <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Money you moved between your own accounts and to/from other people — this is neither spending nor income, so it's netted out of the totals above (moving your own cash isn't spending). Arrows show direction; thicker line = more money. Click a line to list its transfers in the Transactions window.">i</span></h2>
+  <div class="panel" id="transfers-panel"></div>
+
+  <!-- E-transfers by recipient -->
+  <h2 class="sec-h">E-transfers — who you paid &amp; who paid you <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Interac e-transfers grouped by the person you sent to or received from — even when no rule names them, the recipient is read from the description. Use it to see who you paid, when, and how much.">i</span></h2>
+  <div class="panel" id="etransfers-panel"></div>
+
+  <!-- Recurring / subscriptions -->
+  <h2 class="sec-h">Recurring &amp; subscriptions <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Charges that repeat on a regular cadence (weekly / monthly / yearly) with a stable amount — subscriptions, rent, insurance. 'Monthly equivalent' converts yearly bills to a per-month cost so you can compare them. What to watch: subscriptions you forgot you had, or ones whose amount is creeping up.">i</span></h2>
+  <div class="panel" id="recurring-panel"></div>
+
+  <!-- Anomalies -->
+  <h2 class="sec-h">Unusual Activity and Warnings <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="A battery of robust, explainable checks: outlier amounts, an expensive month, a rare big-ticket purchase, duplicate charges, an unfamiliar new large payee, subscription price hikes, card-testing bursts, season-adjusted spikes, sustained spending shifts and deficit streaks — plus (for the business/public profile) Benford's-law, near-threshold and round-number checks. The 'Why' column explains each flag; rows are sorted most-serious first and follow the filter bar. A flag isn't always a problem — just worth a look.">i</span></h2>
+  <div class="panel" id="anomalies-panel"></div>
+
+  <!-- Trends: spending (out) and income (in) as separate sections -->
+  <h2 class="sec-h">Spending trends (out) <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="How each spending category changed: month-over-month (latest full month vs the one before) and year-over-year (vs the same month last year). Each arrow sits on its own number — ↓ green means spending fell (good), ↑ red means it rose. MoM and YoY can point different ways (one month vs a whole year apart). The current partial month is excluded. What to watch: big red ↑ movers.">i</span></h2>
+  <div class="panel" id="trends-out-panel"></div>
+
+  <h2 class="sec-h">Income trends (in) <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="How each income source changed: month-over-month and year-over-year. Each arrow sits on its own number — ↑ green means income rose (good), ↓ red means it fell. MoM and YoY can point different ways. The current partial month is excluded. What to watch: a source you rely on with a red ↓.">i</span></h2>
+  <div class="panel" id="trends-in-panel"></div>
+
+  <!-- By person / account -->
+  <div class="grid2">
+    <div>
+      <h2 class="sec-h">By person <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="Spending, income and net for each person in the household. Net = income − spending. Transfers between you don't count here, so this reflects real money each person brought in and spent.">i</span></h2>
+      <div class="panel" id="by-person-panel"></div>
+    </div>
+    <div>
+      <h2 class="sec-h">By account <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="The same money in / out / net breakdown per card or account. Useful to see which card carries most of the spending, or which account most income lands in.">i</span></h2>
+      <div class="panel" id="by-account-panel"></div>
+    </div>
+  </div>
+
+  <!-- Recommendations (narrative; not filtered) -->
+  <h2>Recommendations</h2>
+  <div class="panel" id="recs-panel"></div>
+
+  <!-- Top merchants -->
+  <h2 class="sec-h">Top merchants <span class="help" tabindex="0" role="img" aria-label="How to read this" data-tip="The merchants you spent the most at, by total. Count and average ticket help you tell a few big purchases apart from many small ones at the same place.">i</span></h2>
+  <div class="panel" id="merchants-panel"></div>
+
+  <div class="footer">
+    <span id="dedup-note"></span>
+    <br>Generated by where-did-money-go · all figures computed deterministically by the Rust engine; filtered views are recomputed in your browser from the same exact, per-transaction amounts. Opens fully offline.
+  </div>
+
+</div>
+
+</div>
+
+<!-- Configuration: projects (data set + config files), all stored in this browser. -->
+<div id="config-screen" class="config-screen" hidden>
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <h1>Configuration</h1>
+        <div class="sub">Projects = statement CSVs + config files (+ optional insights.json). Everything stays in this browser — nothing is uploaded anywhere.</div>
+      </div>
+      <div class="top-actions">
+        <button class="btn" id="config-close" type="button">← Back to report</button>
+      </div>
+    </header>
+    <div id="config-body"></div>
+  </div>
+</div>
+</body>
+</html>

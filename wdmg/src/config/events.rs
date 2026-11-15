@@ -81,22 +81,18 @@ impl EventsDoc {
             })?;
             // A period must have a valid end on/after its start.
             if let Some(end) = &ev.end {
-                let end_date =
-                    jiff::civil::Date::strptime("%Y-%m-%d", end).map_err(|source| {
-                        ConfigError::Invalid {
-                            context: format!("event \"{}\"", ev.label),
-                            message: format!(
-                                "end date \"{end}\" is not a valid YYYY-MM-DD date: {source}"
-                            ),
-                        }
-                    })?;
+                let end_date = jiff::civil::Date::strptime("%Y-%m-%d", end).map_err(|source| {
+                    ConfigError::Invalid {
+                        context: format!("event \"{}\"", ev.label),
+                        message: format!(
+                            "end date \"{end}\" is not a valid YYYY-MM-DD date: {source}"
+                        ),
+                    }
+                })?;
                 if end_date < start {
                     return Err(ConfigError::Invalid {
                         context: format!("event \"{}\"", ev.label),
-                        message: format!(
-                            "end date \"{end}\" is before start date \"{}\"",
-                            ev.date
-                        ),
+                        message: format!("end date \"{end}\" is before start date \"{}\"", ev.date),
                     });
                 }
             }

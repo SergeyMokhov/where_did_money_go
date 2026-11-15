@@ -10,22 +10,33 @@ use std::path::Path;
 
 use jiff::civil::{Date, Time};
 
-use crate::config::{CompiledProfile, Sign};
+use crate::config::{CompiledProfile, Sign, TypeSpec};
 use crate::error::{IngestError, ParseError};
 use crate::model::{Currency, Money, Transaction, TxnType};
 use crate::normalize::normalize_merchant;
 
 use super::detect::{basename, strip_bom};
 
-/// Parse `path` into transactions using `profile`. Merchant normalization is
-/// applied here; `dedup_key`/owner/account are left for later phases.
+/// Parse the file at `path` into transactions using `profile`. Thin fs wrapper
+/// over [`read_text`].
 pub fn read_file(profile: &CompiledProfile, path: &Path) -> Result<Vec<Transaction>, IngestError> {
     let raw = std::fs::read_to_string(path).map_err(|source| IngestError::Read {
         path: path.to_path_buf(),
         source,
     })?;
-    let text = strip_bom(&raw);
-    let base = basename(path);
+    read_text(profile, path, &raw)
+}
+
+/// Parse decoded file `content` (from a file named `label`) into transactions
+/// using `profile`. Merchant normalization is applied here;
+/// `dedup_key`/owner/account are left for later phases.
+pub fn read_text(
+    profile: &CompiledProfile,
+    label: &Path,
+    content: &str,
+) -> Result<Vec<Transaction>, IngestError> {
+    let text = strip_bom(content);
+    let base = basename(label);
     let delimiter = profile.profile.layout.delimiter.unwrap_or(',') as u8;
 
     // Split header from body so we can drop the configured count of blank rows
@@ -64,7 +75,7 @@ pub fn read_file(profile: &CompiledProfile, path: &Path) -> Result<Vec<Transacti
     // Map header name -> column index. Header names are used verbatim (including
     // any leading space, e.g. " Transaction Amount").
     let headers = rdr.headers().map_err(|source| IngestError::Csv {
-        path: path.to_path_buf(),
+        path: label.to_path_buf(),
         source,
     })?;
     let index: HashMap<String, usize> = headers
@@ -76,12 +87,11 @@ pub fn read_file(profile: &CompiledProfile, path: &Path) -> Result<Vec<Transacti
     let p = &profile.profile;
     // Validate every declared column exists up front ("parse, don't validate":
     // fail at the boundary with a clear typed error, never silently).
-    let mut required = vec![
-        p.date.column.as_str(),
-        p.amount.column.as_str(),
-        p.merchant.column.as_str(),
-        p.type_spec.column.as_str(),
-    ];
+    let mut required = vec![p.date.column.as_str(), p.amount.column.as_str()];
+    required.extend(p.merchant.columns());
+    if let Some(t) = &p.type_spec.column {
+        required.push(t.as_str());
+    }
     if let Some(m) = &p.memo {
         required.push(m.column.as_str());
     }
@@ -104,7 +114,7 @@ pub fn read_file(profile: &CompiledProfile, path: &Path) -> Result<Vec<Transacti
     let mut out = Vec::new();
     for (row_idx, record) in rdr.records().enumerate() {
         let record = record.map_err(|source| IngestError::Csv {
-            path: path.to_path_buf(),
+            path: label.to_path_buf(),
             source,
         })?;
         // Skip stray fully-empty records.
@@ -162,17 +172,11 @@ fn parse_record(
     let amount = parse_amount(profile, index, record, row)?;
 
     // --- merchant ---
-    let raw_description = strip_card_quote(cell(index, record, &p.merchant.column)).to_string();
+    let raw_description = merchant_text(&p.merchant, index, record);
     let normalized_merchant = normalize_merchant(&raw_description, profile);
 
     // --- type map ---
-    let raw_type = cell(index, record, &p.type_spec.column).trim();
-    let txn_type = p
-        .type_spec
-        .map
-        .get(raw_type)
-        .map(|m| TxnType::from_mapped(m))
-        .unwrap_or(TxnType::Unknown);
+    let txn_type = classify(&p.type_spec, index, record, &amount);
 
     // --- cardholder (raw person column, retained for identity matching) ---
     let cardholder = p.person.as_ref().and_then(|pe| {
@@ -223,6 +227,39 @@ fn parse_record(
     })
 }
 
+/// The description: the merchant column, plus any `extra_columns` (non-empty
+/// cells only), joined by single spaces.
+fn merchant_text(
+    spec: &crate::config::MerchantSpec,
+    index: &HashMap<String, usize>,
+    record: &csv::StringRecord,
+) -> String {
+    if spec.extra_columns.is_empty() {
+        return strip_card_quote(cell(index, record, &spec.column)).to_string();
+    }
+    spec.columns()
+        .map(|c| strip_card_quote(cell(index, record, c)).trim())
+        .filter(|v| !v.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `"2026-03-31 12:00:00 AM"` → `"2026-03-31"`: the value with a trailing clock
+/// time (12/24h, optional seconds/fraction, AM/PM, `T` separator, `Z`/offset)
+/// removed, or `None` when there is none. Lets every date format also accept
+/// exports that stamp a (usually meaningless) time onto the date.
+fn strip_time_suffix(s: &str) -> Option<&str> {
+    // INVARIANT: a constant pattern (covered by tests); it always compiles.
+    #[allow(clippy::expect_used)]
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)^(.*?\d)[ T]+\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:[ap]\.?m\.?)?\s*(?:z|[+-]\d{2}:?\d{2})?$",
+        )
+        .expect("time-suffix regex")
+    });
+    RE.captures(s).and_then(|c| c.get(1)).map(|m| m.as_str())
+}
+
 /// Parse the date and any optional companion `Time` column.
 fn parse_date_time(
     p: &crate::config::Profile,
@@ -232,13 +269,12 @@ fn parse_date_time(
     formats: &[String],
     row: usize,
 ) -> Result<(Date, Option<Time>), ParseError> {
-    let mut date = None;
-    for fmt in formats {
-        if let Ok(d) = Date::strptime(fmt.as_bytes(), date_raw.as_bytes()) {
-            date = Some(d);
-            break;
-        }
-    }
+    let try_all = |v: &str| {
+        formats
+            .iter()
+            .find_map(|fmt| Date::strptime(fmt.as_bytes(), v.as_bytes()).ok())
+    };
+    let date = try_all(date_raw).or_else(|| strip_time_suffix(date_raw).and_then(try_all));
     let date = date.ok_or_else(|| ParseError::Date {
         profile: p.id.clone(),
         row,
@@ -323,6 +359,31 @@ fn parse_amount(
                 })
             }
         }
+    }
+}
+
+/// Kind from the type column's map, else from the amount's sign (`by_sign`),
+/// else `Unknown` (left to categorization rules).
+fn classify(
+    spec: &TypeSpec,
+    index: &HashMap<String, usize>,
+    record: &csv::StringRecord,
+    amount: &Money,
+) -> TxnType {
+    let mapped = spec
+        .column
+        .as_deref()
+        .map(|c| cell(index, record, c).trim())
+        .and_then(|raw| spec.map.get(raw))
+        .map(|m| TxnType::from_mapped(m))
+        .filter(|t| *t != TxnType::Unknown);
+    if let Some(t) = mapped {
+        return t;
+    }
+    match &spec.by_sign {
+        Some(bs) if amount.amount().is_sign_negative() => TxnType::from_mapped(&bs.negative),
+        Some(bs) => TxnType::from_mapped(&bs.positive),
+        None => TxnType::Unknown,
     }
 }
 

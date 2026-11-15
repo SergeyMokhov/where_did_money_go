@@ -123,6 +123,40 @@ config and re-run to refine. Everything in the report is complete except the LLM
 
 ---
 
+## Browser app (no regeneration needed)
+
+`web/` is the same report as a **single offline HTML app** that loads data sets itself.
+The Rust engine is compiled to WebAssembly and runs in the page, so the numbers are
+identical to the CLI's (verified by a deep-equal smoke test).
+
+- **⚙ Configuration** manages *projects* (statement CSVs + config TOMLs + optional
+  `insights.json`), stored in the browser's IndexedDB. You can upload and download
+  individual files, export or import a project as a `.zip`, and create, rename or delete
+  projects. The bundled **demo** project can't be deleted; **↺ Reset demo** restores it.
+  No file leaves the browser.
+- **AI insights:** export the project zip, ask Claude (this skill) to run the insight
+  step on it (`data/` is the `--input`, `config/` the `--config`), then upload the
+  resulting `insights.json` back into the project.
+- **Cash flow → View: Change points** shows separate Net / In / Out charts. Grey dots are
+  the buckets (Auto / Weekly / Bi-weekly / Monthly, as before) and the stepped line is the
+  detected level with its 95% band. A **+N / −N** mark at each level change is green when
+  it's good for your money and red when it isn't, and a red ring flags a bucket unusually
+  high or low for its level (XmR limits). Life events and unusual-activity tags are
+  overlaid. **Standard / Sensitive** set the detection penalty (PELT, robust noise
+  estimate). "New level after N days" (default 14) is the minimum level duration; when
+  the engine picks monthly blocks because paydays make weekly data too noisy, the
+  effective minimum is ~2 months and the chart says so. Each level lists its unusual-bucket
+  rate and, for Net, its share of net-negative weeks, both with Wilson 95% intervals.
+
+```bash
+scripts/build-wasm.sh          # Rust -> web/src/wasm (needs wasm32 target + wasm-bindgen-cli 0.2.108)
+cd web && yarn install
+yarn dev                       # or: yarn build  -> dist/index.html (one file, opens via file://)
+yarn test                      # storage/demo/zip unit tests
+node scripts/verify-e2e.mjs    # headless-Firefox end-to-end check of dist/index.html
+yarn deploy                    # build and copy to ../docs/index.html (GitHub Pages)
+```
+
 ## How configuration works
 
 Three TOML files live in your config directory. `wdmg init` writes the defaults; edit them by
