@@ -63,11 +63,20 @@ impl Roster {
 /// Apply `id_from_filename` of the transaction's profile to recover the captured
 /// id (typically a 4-digit suffix).
 fn captured_last4(config: &Config, txn: &Transaction) -> Option<String> {
-    let profile = config
+    // INVARIANT: a constant pattern; it always compiles.
+    #[allow(clippy::expect_used)]
+    static INFERRED: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(\d{4})").expect("last-4 regex"));
+    let re = match config
         .profiles
         .iter()
-        .find(|p| p.profile.id == txn.profile_id)?;
-    let re = profile.id_from_filename.as_ref()?;
+        .find(|p| p.profile.id == txn.profile_id)
+    {
+        Some(profile) => profile.id_from_filename.as_ref()?,
+        // A layout inferred from the file (not in the config) captures a last-4 too.
+        None if crate::ingest::infer::kind_of(&txn.profile_id).is_some() => &INFERRED,
+        None => return None,
+    };
     re.captures(&txn.source_file)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string())

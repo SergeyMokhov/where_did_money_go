@@ -3,6 +3,9 @@
 # Each [[profile]] describes how to detect and parse one CSV export layout.
 # Profiles are matched top-to-bottom; the FIRST profile whose `match` rules all
 # succeed wins. Add a new source by appending a [[profile]] block — no recompile.
+# Files no profile matches are read by layout inference (wdmg/src/ingest/infer.rs):
+# the columns are recognised by their usual names (or contents, with no header), so
+# only exports with quirks the inference can't see need a profile here.
 #
 # Detection (`match`):
 #   header_first_cell  = exact first header cell, AFTER stripping a UTF-8 BOM and

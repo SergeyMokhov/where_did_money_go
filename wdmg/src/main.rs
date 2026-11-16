@@ -4,8 +4,6 @@
 //! - `init` — write default config files into a directory.
 //! - `analyze` — parse → dedup → categorize → reconcile → analytics; writes
 //!   `analysis.json` and `review_queue.json`.
-//! - `report` — render a self-contained `report.html` from `analysis.json`
-//!   (+ optional `insights.json`).
 //! - `add-category` / `add-rule` / `add-person` / `assign-account` /
 //!   `assign-transfer` — lossless TOML edits of the working-dir config files.
 
@@ -18,8 +16,6 @@ use wdmg::config::{
     defaults, Account, CategoriesDoc, Category, CategoryKind, PeopleDoc, Person, Subcategory,
     TransferRule,
 };
-use wdmg::emit::Analysis;
-use wdmg::report::{write_report, Insights};
 
 /// where-did-money-go: analyze personal finance statements.
 #[derive(Debug, Parser)]
@@ -46,18 +42,6 @@ enum Command {
         #[arg(long)]
         config: PathBuf,
         /// Output directory for analysis.json and review_queue.json (created).
-        #[arg(long)]
-        out: PathBuf,
-    },
-    /// Render a self-contained interactive report.html.
-    Report {
-        /// Path to analysis.json (from `analyze`).
-        #[arg(long)]
-        analysis: PathBuf,
-        /// Optional path to insights.json (LLM-authored narrative).
-        #[arg(long)]
-        insights: Option<PathBuf>,
-        /// Output path for report.html.
         #[arg(long)]
         out: PathBuf,
     },
@@ -161,11 +145,6 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Init { dir } => cmd_init(&dir),
         Command::Analyze { input, config, out } => cmd_analyze(&input, &config, &out),
-        Command::Report {
-            analysis,
-            insights,
-            out,
-        } => cmd_report(&analysis, insights.as_deref(), &out),
         Command::AddCategory { config, name, kind } => cmd_add_category(&config, &name, &kind),
         Command::AddRule {
             config,
@@ -241,29 +220,6 @@ fn cmd_analyze(input: &Path, config_dir: &Path, out: &Path) -> Result<()> {
         outcome.review_queue.unknown_merchants.len()
             + outcome.review_queue.unassigned_transfers.len(),
     );
-    Ok(())
-}
-
-/// Render report.html from analysis.json (+ optional insights.json).
-fn cmd_report(analysis_path: &Path, insights_path: Option<&Path>, out: &Path) -> Result<()> {
-    let analysis_text = std::fs::read_to_string(analysis_path)
-        .with_context(|| format!("failed to read {}", analysis_path.display()))?;
-    let analysis: Analysis = serde_json::from_str(&analysis_text)
-        .with_context(|| format!("failed to parse {}", analysis_path.display()))?;
-
-    let insights = match insights_path {
-        Some(p) => {
-            let text = std::fs::read_to_string(p)
-                .with_context(|| format!("failed to read {}", p.display()))?;
-            Insights::from_json(&text)
-                .with_context(|| format!("failed to parse {}", p.display()))?
-        }
-        None => Insights::default(),
-    };
-
-    write_report(out, &analysis, &insights)
-        .with_context(|| format!("failed to write {}", out.display()))?;
-    println!("wrote {}", out.display());
     Ok(())
 }
 

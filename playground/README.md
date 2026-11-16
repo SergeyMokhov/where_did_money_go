@@ -1,23 +1,21 @@
 # Playground — a Futurama-themed demo dataset
 
 A self-contained, **fictional** dataset that exercises every feature of the
-report, so you can explore the tool without using real statements. No real names,
-places, or account numbers — just Fry, Leela, Bender & co.
+app, so you can explore it without using real statements. No real names,
+places, or account numbers — just Fry, Leela, Bender & co. It is the app's
+**demo project**: `data/` and `config/` are bundled into the page at build time.
 
-## Run it
+## Regenerate it
 
 ```bash
-./playground/generate.sh
-# opens nothing; then open playground/report.html in a browser
+./playground/generate.sh      # rewrites data/*.csv, then analyzes them as a check
+cd web && yarn build          # rebuild the app so its demo picks up the change
 ```
 
 `generate.sh` (re)builds the `wdmg` binary if needed, writes the CSV exports into
-`playground/data/`, analyzes them with `playground/config/`, and renders
-`playground/report.html` (fully offline).
-
-> The generated `data/`, `analysis.json`, `review_queue.json`, and `report.html`
-> are git-ignored — the **generator and config are the source of truth**; anyone
-> can reproduce the rest with one command.
+`playground/data/` (seeded — the same every run), and analyzes them with
+`playground/config/`, leaving `analysis.json` and `review_queue.json` here
+(git-ignored). `config/insights.json` holds the demo's curated AI insights.
 
 ## The story (and the features it shows off)
 

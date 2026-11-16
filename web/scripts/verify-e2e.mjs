@@ -27,6 +27,14 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('dialog', (d) => d.accept());
+// The no-network guarantee: nothing but the file itself (and in-page data:/blob: URLs) may load.
+const netRequests = [];
+page.on('request', (r) => { if (!/^(file|data|blob|about):/.test(r.url())) netRequests.push(r.url()); });
+await page.evaluateOnNewDocument(() => {
+  document.addEventListener('securitypolicyviolation', (e) => {
+    (window.__cspViolations = window.__cspViolations || []).push(`${e.violatedDirective} ${e.blockedURI}`);
+  });
+}).catch(() => {});
 const shot = (name, full = false) => page.screenshot({ path: `${OUT}/${name}.png`, fullPage: full });
 const visible = (sel) => page.$eval(sel, (el) => !el.hidden && getComputedStyle(el).display !== 'none').catch(() => false);
 const clickText = async (sel, text) => {
@@ -43,7 +51,7 @@ try {
 await page.goto(APP);
 await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
 const cards = await page.$$eval('#cards .card', (c) => c.length);
-const proj = await page.$eval('#proj-name', (e) => e.textContent);
+const proj = await page.$eval('#proj-name b', (e) => e.textContent);
 const recs = await page.$$eval('#recs-panel .rec', (r) => r.length);
 step(cards > 0 && /Demo/.test(proj), 'demo report renders', `cards=${cards} project="${proj}" recs=${recs}`);
 await shot('01-raw');
@@ -505,7 +513,7 @@ await clickText('.cfg-actions button', 'Delete project');
 await page.waitForFunction(() => !/E2E household/.test(document.querySelector('.cfg-projects').textContent));
 await page.click('#config-close');
 await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
-const back = await page.$eval('#proj-name', (e) => e.textContent);
+const back = await page.$eval('#proj-name b', (e) => e.textContent);
 step(/Demo/.test(back), 'deleting the active project falls back to the demo', back);
 
 // Explore view → ✎ Rename: the account is renamed in the demo's people.toml and the report re-analyzes.
@@ -655,6 +663,120 @@ const pinCat = await page.evaluate(() => new Promise((res) => {
 step(/^1 transaction would be sorted differently/.test(pv.verdict) && pv.ticked === 1 && pv.rangeHidden && /\[\[pin\]\]/.test(pinCat) && /PLAYGROUND categories/.test(pinCat),
   '“Only this one” pins a single transaction (saved as [[pin]])', JSON.stringify({ pinMer, pv, pin: pinCat.slice(pinCat.indexOf('[[pin]]'), pinCat.indexOf('[[pin]]') + 160) }));
 
+// A layout no built-in format knows (no header row, money out / money in / balance) is read automatically.
+const AUTO_CSV = `${OUT}/accountactivity.csv`;
+fs.writeFileSync(AUTO_CSV, '09/01/2999,PLANET EXPRESS PAYROLL,,1800.00,2800.00\n09/02/2999,SLURM VENDING,4.25,,2795.75\n09/03/2999,FISHY JOES,18.40,,2777.35\n');
+await page.click('#config-open');
+await page.waitForSelector('.cfg-new');
+await page.type('.cfg-new input[type=text]', 'E2E auto');
+await clickText('.cfg-new button', 'New project');
+await page.waitForFunction(() => document.querySelector('.cfg-name')?.value === 'E2E auto');
+await (await page.$('input[type=file][multiple]')).uploadFile(AUTO_CSV);
+await page.waitForFunction(() => /read automatically/.test(document.querySelector('.cfg-files')?.textContent || ''), { timeout: 10000 });
+const autoTxt = await page.$eval('.cfg-files', (t) => t.textContent);
+step(/read automatically \(bank account\) · 3 rows/.test(autoTxt) && /Map columns/.test(autoTxt), 'a headerless bank export is read automatically (Map columns… still offered)', autoTxt.replace(/\s+/g, ' ').slice(0, 90));
+await clickText('.cfg-actions button', 'Delete project');
+await page.waitForFunction(() => !/E2E auto/.test(document.querySelector('.cfg-projects').textContent));
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.click('#config-close')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+
+// An empty new project opens on a "start here" card, not an all-zero dashboard.
+await page.click('#config-open');
+await page.waitForSelector('.cfg-new');
+await page.type('.cfg-new input[type=text]', 'E2E empty');
+await clickText('.cfg-new button', 'New project');
+await page.waitForFunction(() => document.querySelector('.cfg-name')?.value === 'E2E empty');
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), clickText('.cfg-actions button', 'Open in report')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+const empty = await page.evaluate(() => ({
+  card: !!document.querySelector('.empty-proj:not([hidden])') && /has no statements yet/.test(document.querySelector('.empty-proj').textContent),
+  // What's actually visible, not just attributes (CSS display can override [hidden]).
+  cardsHidden: getComputedStyle(document.getElementById('cards')).display === 'none'
+    && [...document.querySelectorAll('#report-root > :not(.wrap)')].every((e) => getComputedStyle(e).display === 'none'),
+  name: document.querySelector('#proj-name').textContent,
+}));
+await shot('05-empty-project');
+step(empty.card && empty.cardsHidden && empty.name === 'Project: E2E empty', 'an empty project shows a start-here card, not a zero dashboard', JSON.stringify(empty));
+await page.click('#proj-name');
+await page.waitForSelector('.cfg-actions');
+await clickText('.cfg-actions button', 'Delete project');
+await page.waitForFunction(() => !/E2E empty/.test(document.querySelector('.cfg-projects').textContent));
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.click('#config-close')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+
+// Passphrase encryption: protect a new project, see it stored only encrypted, lock, unlock at boot.
+await page.click('#config-open');
+await page.waitForSelector('.cfg-new');
+await page.type('.cfg-new input[type=text]', 'E2E secret');
+await clickText('.cfg-new button', 'New project');
+await page.waitForFunction(() => document.querySelector('.cfg-name')?.value === 'E2E secret');
+const startTxt = await page.$eval('.cfg-start', (d) => d.textContent);
+await (await page.$('input[type=file][multiple]')).uploadFile(SAMPLE);
+await page.waitForFunction(() => /Statements \(1\)/.test(document.body.textContent), { timeout: 10000 });
+await shot('08-config-new', true);
+await clickText('.cfg-safety button', 'Protect with a passphrase');
+await page.waitForSelector('.pv-box input[type=password]');
+const pw = await page.$$('.pv-box input[type=password]');
+await pw[0].type('correct horse battery'); await pw[1].type('correct horse battery');
+await page.$eval('.pv-box input[type=checkbox]', (c) => { c.checked = true; c.dispatchEvent(new Event('input')); });
+await (await page.$('.pv-box')).screenshot({ path: `${OUT}/06-passphrase.png` });
+await clickText('.pv-box .map-actions button', 'Encrypt');
+await page.waitForFunction(() => /Encrypted with a passphrase/.test(document.querySelector('.cfg-safety')?.textContent || ''), { timeout: 15000 });
+const atRest = await page.evaluate(() => new Promise((res) => {
+  const rq = indexedDB.open('wdmg-projects');
+  rq.onsuccess = () => {
+    const all = rq.result.transaction('projects').objectStore('projects').getAll();
+    all.onsuccess = () => {
+      const d = all.result.find((x) => x.name === 'E2E secret');
+      const txt = new TextDecoder('latin1').decode(d.sealed.data);
+      res({ files: d.files.length, sealedBytes: d.sealed.data.length, leaks: /PLANET EXPRESS/i.test(txt) });
+    };
+  };
+}));
+step(/Getting started/.test(startTxt) && atRest.files === 0 && atRest.sealedBytes > 100 && !atRest.leaks,
+  'protect with a passphrase: stored only encrypted (getting-started checklist shown)', JSON.stringify(atRest));
+// Open it in the report (unlocked in this tab), then lock and reload: the boot asks for the passphrase.
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), clickText('.cfg-actions button', 'Open in report')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+const openName = await page.$eval('#proj-name b', (e) => e.textContent);
+await page.click('#config-open');
+await page.waitForSelector('.cfg-safety');
+await clickText('.cfg-safety button', 'Lock now');
+await page.waitForSelector('.cfg-right .pv-unlock');
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.click('#config-close')]);
+await page.waitForSelector('#boot .pv-unlock', { timeout: 30000 });
+await page.type('#boot .pv-pass', 'wrong horse battery');
+await page.keyboard.press('Enter');
+await page.waitForFunction(() => /Wrong passphrase/.test(document.querySelector('#boot .pv-msg').textContent), { timeout: 20000 });
+await page.$eval('#boot .pv-pass', (i) => { i.value = ''; });
+await page.type('#boot .pv-pass', 'correct horse battery');
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.keyboard.press('Enter')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+const reopened = await page.$eval('#proj-name b', (e) => e.textContent);
+step(openName === 'E2E secret' && reopened === 'E2E secret', 'locked project: wrong passphrase refused, right one opens the report', `${openName} -> ${reopened}`);
+await shot('07-unlocked');
+await page.click('#privacy-open');
+const pvTxt = await page.$eval('.pv-body', (b) => b.textContent);
+step(/Content-Security-Policy/.test(pvTxt) && /AES-GCM/.test(pvTxt) && /same address/.test(pvTxt), 'privacy note explains no-network, storage and encryption', pvTxt.slice(0, 60).trim());
+await page.keyboard.press('Escape');
+// Clean up: delete it; the demo comes back.
+await page.click('#config-open');
+await page.waitForSelector('.cfg-actions');
+await clickText('.cfg-actions button', 'Delete project');
+await page.waitForFunction(() => !/E2E secret/.test(document.querySelector('.cfg-projects').textContent));
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), page.click('#config-close')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+
+// The page can't reach the network even when it tries: the CSP blocks it before any request.
+const net = await page.evaluate(async () => {
+  const csp = document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content') || '';
+  const r = await fetch('https://example.com/should-be-blocked').then(() => 'reached', (e) => `blocked (${e.name})`);
+  const img = await new Promise((res) => { const i = new Image(); i.onload = () => res('loaded'); i.onerror = () => res('blocked'); i.src = 'https://example.com/x.png'; });
+  return { csp, r, img, violations: window.__cspViolations || [] };
+});
+step(/connect-src 'none'/.test(net.csp) && /^blocked/.test(net.r) && net.img === 'blocked' && netRequests.length === 0,
+  'no network: CSP blocks fetch and remote images; the app made no requests', JSON.stringify({ fetch: net.r, img: net.img, requests: netRequests.slice(0, 3), violationsFromTest: net.violations.length }));
+
 // Hovering an unusual-activity tag on the chart's top rail explains it.
 if (!(await page.$eval('#txwin', (w) => w.hidden))) { await page.click('#txwin .fw-min'); await sleep(700); }
 const over = await page.evaluate(() => {
@@ -676,7 +798,8 @@ step(/(High|Medium|Low) · /.test(tipTxt) && /Unusual activity/.test(tipTxt), 'h
   await shot('zz-failure', true).catch(() => {});
   console.log('page text:', (await page.evaluate(() => document.body.innerText.slice(0, 600)).catch(() => '?')).replace(/\s+/g, ' '));
 }
-step(errors.length === 0, 'no page errors', errors.slice(0, 5).join(' | ') || 'none');
+const realErrors = errors.filter((e) => !/example\.com/.test(e)); // the deliberate blocked requests above
+step(realErrors.length === 0, 'no page errors (incl. CSP violations)', realErrors.slice(0, 5).join(' | ') || 'none');
 await browser.close();
 console.log(failed ? `${failed} FAILED` : 'ALL OK', `screenshots in ${OUT}`);
 process.exit(failed ? 1 : 0);

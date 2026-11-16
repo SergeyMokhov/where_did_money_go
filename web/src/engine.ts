@@ -6,8 +6,22 @@ import wasmUrl from './wasm/wdmg_bg.wasm?url';
 import { CONFIG_NAMES, type ProjectDoc } from './store';
 
 let ready: Promise<unknown> | null = null;
+/**
+ * The engine's bytes. In the single-file build the .wasm is an inline data: URL,
+ * decoded here rather than fetched — the page's Content-Security-Policy forbids
+ * every network API (`connect-src 'none'`), fetch of data: URLs included. In dev
+ * it's a normal URL served by Vite.
+ */
+function wasmSource(): string | Uint8Array {
+  const m = /^data:[^,]*;base64,(.*)$/s.exec(wasmUrl);
+  if (!m) return wasmUrl;
+  const bin = atob(m[1]);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
 export function initEngine(): Promise<unknown> {
-  if (!ready) ready = init({ module_or_path: wasmUrl });
+  if (!ready) ready = init({ module_or_path: wasmSource() });
   return ready;
 }
 
@@ -122,9 +136,9 @@ export type PeopleOp =
   | { op: 'delete_rule'; index: number }
   | { op: 'order_rules'; order: number[] };
 
-/** The project's people.toml, or the built-in default when it has none. */
+/** The project's people.toml, or an empty household when it has none (the shipped one is a themed example). */
 export function peopleText(doc: ProjectDoc): string {
-  return projectConfig(doc)['people.toml'] ?? defaultConfig()['people.toml'] ?? 'schema_version = 1\n';
+  return projectConfig(doc)['people.toml'] ?? 'schema_version = 1\n';
 }
 export function parsePeople(text: string): PeopleDoc {
   return JSON.parse(wasm.parse_people(text));

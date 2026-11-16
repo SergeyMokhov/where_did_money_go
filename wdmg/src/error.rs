@@ -196,16 +196,6 @@ pub enum AnalyticsError {
         #[source]
         source: std::io::Error,
     },
-
-    /// Rendering the HTML report template failed.
-    #[error("failed to render {what}: {source}")]
-    Template {
-        /// Which template failed (e.g. `report.html`).
-        what: String,
-        /// Underlying askama error.
-        #[source]
-        source: askama::Error,
-    },
 }
 
 /// Top-level library error wrapping every phase-specific error.

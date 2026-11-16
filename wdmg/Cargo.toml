@@ -16,7 +16,6 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
-askama = "0.16"
 blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 csv = "1"

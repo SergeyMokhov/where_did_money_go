@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Regenerate the playground data and report end-to-end.
+# Regenerate the playground (demo) data and check it analyzes cleanly.
 #
 #   ./playground/generate.sh
 #
-# Produces ./playground/data/*.csv, runs the analyzer with ./playground/config,
-# and renders ./playground/report.html — open it in any browser (fully offline).
+# Produces ./playground/data/*.csv and runs the analyzer with ./playground/config
+# (writing analysis.json + review_queue.json here). The browser app bundles this
+# data + config as its demo project: rebuild it with `cd web && yarn build`.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
@@ -21,7 +22,4 @@ python3 "$HERE/generate_data.py"
 echo "analyzing…"
 "$BIN" analyze --input "$HERE/data" --config "$HERE/config" --out "$HERE"
 
-echo "rendering report…"
-"$BIN" report --analysis "$HERE/analysis.json" --out "$HERE/report.html"
-
-echo "done -> $HERE/report.html"
+echo "done — rebuild the app (cd web && yarn build) to refresh its demo project"

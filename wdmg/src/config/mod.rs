@@ -30,8 +30,8 @@ pub use categories::{
 pub use events::{EventsDoc, LifeEvent};
 pub use people::{Account, PeopleDoc, Person, TransferRule};
 pub use profiles::{
-    AccountSpec, AmountSpec, BySign, DateSpec, MemoSpec, MerchantSpec, Profile, ProfilesDoc, Sign,
-    TypeSpec,
+    AccountSpec, AmountSpec, BySign, DateSpec, DirectionSpec, Encoding, Layout, MatchRules,
+    MemoSpec, MerchantSpec, PersonSpec, Profile, ProfilesDoc, Sign, StatusSpec, TypeSpec,
 };
 pub use settings::{AnalysisProfile, AnalysisSettings, SettingsDoc};
 
@@ -221,7 +221,7 @@ fn compile_ci(pattern: &str, context: &str) -> Result<Regex, ConfigError> {
 
 impl CompiledProfile {
     /// Compile every regex in a profile, validating each at load time.
-    fn compile(profile: Profile) -> Result<Self, ConfigError> {
+    pub(crate) fn compile(profile: Profile) -> Result<Self, ConfigError> {
         let ctx = &profile.id;
         if let Some(bs) = &profile.type_spec.by_sign {
             for (side, v) in [("negative", &bs.negative), ("positive", &bs.positive)] {
@@ -424,7 +424,7 @@ impl Config {
     /// `source(name)` returns the text of config file `name` (one of
     /// [`Config::FILE_NAMES`]) plus the label to attribute parse errors to, or
     /// `None` when the file is absent. Profiles are layered user > built-in (by
-    /// id); absent people fall back to the embedded defaults; categories are layered user > learned > defaults; absent
+    /// id); absent people mean an empty household; categories are layered user > learned > defaults; absent
     /// events/settings yield empty/consumer defaults.
     fn from_source<F>(mut source: F) -> Result<Self, ConfigError>
     where
@@ -439,11 +439,14 @@ impl Config {
             Some(user) => user.layered_over(builtin),
             None => builtin,
         };
-        // People: prefer the supplied file, else embedded defaults.
-        let people: PeopleDoc = match parse_opt(source("people.toml")?)? {
-            Some(d) => d,
-            None => parse_embedded(DEFAULT_PEOPLE, "people")?,
-        };
+        // People: the supplied file, else an empty household. The shipped
+        // people.toml is a themed example (`wdmg init` writes it); silently
+        // applying its accounts to someone else's statements would invent owners.
+        let people: PeopleDoc = parse_opt(source("people.toml")?)?.unwrap_or(PeopleDoc {
+            schema_version: 1,
+            persons: Vec::new(),
+            transfer_rules: Vec::new(),
+        });
 
         // Categories: defaults < learned < user.
         let defaults: CategoriesDoc = parse_embedded(DEFAULT_CATEGORIES, "categories")?;
@@ -468,8 +471,8 @@ impl Config {
     }
 
     /// Load configuration from `dir`. `categories.toml` and `learned.toml` are
-    /// layered onto the embedded defaults (user > learned > defaults). If a config
-    /// file is absent in `dir`, the embedded default is used.
+    /// layered onto the embedded defaults (user > learned > defaults). An absent
+    /// `people.toml` means no people or accounts; other absent files use the defaults.
     pub fn load(dir: &Path) -> Result<Self, ConfigError> {
         Self::from_source(|name| {
             let path = dir.join(name);
@@ -533,6 +536,16 @@ mod tests {
 
     /// `from_texts` and `load` share one layering path: the playground config
     /// read from disk and the same files supplied in memory build identical configs.
+    #[test]
+    fn a_missing_people_toml_is_an_empty_household() {
+        // The shipped people.toml is a themed example; its accounts (e.g. a
+        // "card_7002" filename matcher) must not attach to someone's own files.
+        let c = Config::from_texts(&BTreeMap::new()).unwrap();
+        assert!(c.people.persons.is_empty());
+        assert!(c.people.transfer_rules.is_empty());
+        assert!(c.account_matchers.is_empty());
+    }
+
     #[test]
     fn from_texts_matches_load() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../playground/config");

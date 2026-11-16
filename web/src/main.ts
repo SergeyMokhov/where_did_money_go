@@ -10,7 +10,10 @@ import { openConfig } from './config';
 import { openRulesEditor, type RuleExample } from './rules';
 import { openPeopleEditor } from './people';
 import { saveProject } from './store';
+import { exportZip } from './zip';
 import { initYank } from './yank';
+import { openPrivacyNote, unlockForm } from './privacy';
+import { setActiveId, unlockProject } from './store';
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 
@@ -39,9 +42,15 @@ function readInsights(doc: ProjectDoc): { insights: Insights; error?: string } {
 }
 
 /** The parts the CLI template rendered server-side (askama), now filled in here. */
+/** "Project: <name>" in the header; clicking it opens Configuration (where projects are switched). */
+function setProjName(name: string) {
+  const n = $('proj-name');
+  n.replaceChildren(el('span', 'muted', 'Project: '), el('b', undefined, name));
+}
+
 function renderStatic(doc: ProjectDoc, res: AnalyzeResult, insights: Insights) {
   const a = res.analysis;
-  $('proj-name').textContent = doc.name;
+  setProjName(doc.name);
   document.title = `${doc.name} · Where Did Money Go?`;
   const p = a.period || {};
   $('period-sub').textContent = [p.start, p.end].filter(Boolean).join(' → ');
@@ -71,7 +80,7 @@ function renderStatic(doc: ProjectDoc, res: AnalyzeResult, insights: Insights) {
   }
   if (!list.length && !notes.length) {
     recs.append(el('div', 'empty',
-      'No insights yet. Export this project, let Claude run the where-did-money-go insight step on it, then upload the resulting insights.json in ⚙ Configuration.'));
+      'No AI insights (optional). ⚙ Configuration → ✨ AI insights explains how: download a summary of your figures, ask Claude to write insights for it, upload the result.'));
   }
 
   const d = a.dedup_report || {};
@@ -134,6 +143,32 @@ function renderNotices(res: AnalyzeResult | null, extra: (string | Node)[], doc?
   box.replaceChildren(...msgs.map((m) => (typeof m === 'string' ? el('div', undefined, m) : m)));
 }
 
+/** A project with no transactions yet: hide the (all-zero) dashboard and say what to do next. */
+function showEmptyProject(doc: ProjectDoc, res: AnalyzeResult) {
+  const wrap = document.querySelector('#report-root .wrap')!;
+  $('report-root').classList.add('is-empty'); // CSS hides all but the header, notices and this card
+  const files = doc.files.length;
+  const unread = res.load_report.errors.length + res.load_report.skipped.length;
+  const card = el('div', 'panel empty-proj');
+  const go = el('button', 'btn active', files ? '⚙ Fix the statements' : '⚙ Add statements');
+  go.addEventListener('click', () => openConfig(doc.id));
+  const demo = el('button', 'btn', 'Open the demo instead');
+  demo.addEventListener('click', async () => { await setActiveId(DEMO_ID); location.reload(); });
+  const title = el('h2', undefined, files ? `None of “${doc.name}”'s ${files} file${files === 1 ? '' : 's'} could be read yet` : `“${doc.name}” has no statements yet`);
+  const steps = el('ol');
+  for (const t of [
+    'Download CSV exports from your bank: on each account’s or card’s transactions page, look for “Download” or “Export” → CSV, with as much history as it offers.',
+    'Drop them into this project in ⚙ Configuration. A layout the app doesn’t know gets a “Map columns…” button.',
+    'Say whose each account is (👥 People & accounts), then sort what the built-in categories don’t catch.',
+  ]) steps.append(el('li', undefined, t));
+  const note = el('p', 'muted', 'The files are read in this browser and stay here — nothing is uploaded.');
+  const actions = el('div', 'empty-proj-actions');
+  actions.append(go, demo);
+  card.append(title, ...(unread ? [el('p', undefined, 'See the messages above for what went wrong.')] : []), steps, note, actions);
+  wrap.querySelector('header')!.after(card);
+  document.getElementById('notices') && card.before(document.getElementById('notices')!);
+}
+
 async function boot() {
   try {
     await initEngine();
@@ -147,10 +182,20 @@ async function boot() {
   if (!doc) { $('boot').textContent = 'No project found.'; return; }
 
   $('config-open').addEventListener('click', () => openConfig(doc.id));
+  $('proj-name').addEventListener('click', () => openConfig(doc.id));
+  for (const id of ['privacy-open', 'privacy-open2']) $(id).addEventListener('click', openPrivacyNote);
   $('config-close').addEventListener('click', () => {
     // Project contents may have changed; the report is cheapest to rebuild from scratch.
     location.reload();
   });
+  if (doc.locked) {
+    // Encrypted and not unlocked in this tab: ask for the passphrase first.
+    const other = el('button', 'btn', 'Open another project…');
+    other.addEventListener('click', () => { $('boot').hidden = true; openConfig(doc.id); });
+    $('boot').replaceChildren(unlockForm(doc.name, (p) => unlockProject(doc.id, p), () => location.reload()), other);
+    $('boot').classList.add('boot-lock');
+    return;
+  }
 
   let res: AnalyzeResult;
   try {
@@ -158,7 +203,7 @@ async function boot() {
   } catch (e) {
     $('boot').hidden = true;
     $('report-root').hidden = false;
-    $('proj-name').textContent = doc.name;
+    setProjName(doc.name);
     renderNotices(null, [`The engine couldn't analyze "${doc.name}": ${(e as Error).message ?? e}`,
       'Open ⚙ Configuration to fix or replace the offending file.']);
     return;
@@ -168,9 +213,25 @@ async function boot() {
   $('report-root').hidden = false;
   renderStatic(doc, res, insights);
   const noData = !(res.analysis.transactions || []).length;
+  const backupNote: Node[] = [];
+  if (!doc.demo && !noData && (!doc.backupAt || (doc.savedAt > doc.backupAt && Date.now() - doc.backupAt > 7 * 86_400_000))) {
+    const line = el('div', 'notice-row notice-soft');
+    const b = el('button', 'btn small', '⇩ Export a backup');
+    b.addEventListener('click', async () => {
+      const blob = new Blob([exportZip(doc) as BlobPart], { type: 'application/zip' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = `${doc.name.replace(/[^\w.-]+/g, '_') || 'project'}.zip`;
+      document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      doc.backupAt = Date.now();
+      await saveProject(doc, { touch: false });
+      line.remove();
+    });
+    line.append(doc.backupAt ? 'This project changed since its last backup. ' : 'This project exists only in this browser — clearing site data would delete it. ', b);
+    backupNote.push(line);
+  }
   renderNotices(res, [
     ...(error ? [error] : []),
-    ...(noData ? ['This project has no transactions yet — add statement CSVs in ⚙ Configuration.'] : []),
+    ...backupNote,
   ], doc);
   // CP settings must be loaded before runReport, which may draw the CP view at init.
   let api: { redraw: () => void } | null = null;
@@ -180,6 +241,7 @@ async function boot() {
     onEditPeople: (focus?: string) => editPeopleFrom(doc, focus),
     onCategorise: (ex: RuleExample) => editRulesFrom(doc, ex),
   });
+  if (noData) showEmptyProject(doc, res);
   initYank($('report-root'));
 }
 

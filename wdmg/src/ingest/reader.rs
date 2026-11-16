@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use jiff::civil::{Date, Time};
+use rust_decimal::Decimal;
 
 use crate::config::{CompiledProfile, Sign, TypeSpec};
 use crate::error::{IngestError, ParseError};
@@ -42,8 +43,14 @@ pub fn read_text(
     // Split header from body so we can drop the configured count of blank rows
     // BEFORE handing the body to the CSV reader (csv treats blank lines as records
     // when flexible, which would otherwise desync our column lookups).
-    let mut lines = text.lines();
-    let header_line = lines.next().unwrap_or("");
+    let lay = &profile.profile.layout;
+    let mut lines = text.lines().skip(lay.header_row);
+    // A headerless file's first line is data: name its columns "1", "2", … instead.
+    let header_line = if lay.headerless {
+        ""
+    } else {
+        lines.next().unwrap_or("")
+    };
     let skip = profile.profile.layout.skip_blank_rows_after_header;
     let mut skipped = 0usize;
     let mut body_lines: Vec<&str> = Vec::new();
@@ -57,8 +64,10 @@ pub fn read_text(
     // Drop any further fully-blank lines defensively.
     let body: String = {
         let mut s = String::with_capacity(text.len());
-        s.push_str(header_line);
-        s.push('\n');
+        if !lay.headerless {
+            s.push_str(header_line);
+            s.push('\n');
+        }
         for l in body_lines {
             s.push_str(l);
             s.push('\n');
@@ -69,20 +78,26 @@ pub fn read_text(
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(delimiter)
         .flexible(true)
-        .has_headers(true)
+        .has_headers(!lay.headerless)
         .from_reader(body.as_bytes());
 
     // Map header name -> column index. Header names are used verbatim (including
-    // any leading space, e.g. " Transaction Amount").
-    let headers = rdr.headers().map_err(|source| IngestError::Csv {
-        path: label.to_path_buf(),
-        source,
-    })?;
-    let index: HashMap<String, usize> = headers
-        .iter()
-        .enumerate()
-        .map(|(i, h)| (h.to_string(), i))
-        .collect();
+    // any leading space, e.g. " Transaction Amount"); headerless files use "1"…
+    let index: HashMap<String, usize> = if lay.headerless {
+        (1..=MAX_POSITIONAL_COLUMNS)
+            .map(|i| (i.to_string(), i - 1))
+            .collect()
+    } else {
+        let headers = rdr.headers().map_err(|source| IngestError::Csv {
+            path: label.to_path_buf(),
+            source,
+        })?;
+        headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (h.to_string(), i))
+            .collect()
+    };
 
     let p = &profile.profile;
     // Validate every declared column exists up front ("parse, don't validate":
@@ -98,6 +113,16 @@ pub fn read_text(
     if let Some(pe) = &p.person {
         required.push(pe.column.as_str());
     }
+    if let Some(st) = &p.status {
+        required.push(st.column.as_str());
+    }
+    if let Some(d) = &p.amount.direction {
+        required.push(d.column.as_str());
+    }
+    if p.amount.sign == Sign::SeparateDebitCredit {
+        required.extend(p.amount.debit_column.as_deref());
+        required.extend(p.amount.credit_column.as_deref());
+    }
     for col in required {
         if !index.contains_key(col) {
             return Err(ParseError::MissingColumn {
@@ -108,32 +133,131 @@ pub fn read_text(
         }
     }
 
-    let date_formats = p.date.all_formats();
     let currency = Currency::new(p.account.currency.clone());
 
-    let mut out = Vec::new();
-    for (row_idx, record) in rdr.records().enumerate() {
+    let mut records = Vec::new();
+    for record in rdr.records() {
         let record = record.map_err(|source| IngestError::Csv {
             path: label.to_path_buf(),
             source,
         })?;
+        records.push(record);
+    }
+    // Several date formats (e.g. month-first and day-first): settle on one for
+    // the whole file when one reads every row, so "03/09" means the same as
+    // "25/09" does. Otherwise (mixed padding, …) each row tries them in order.
+    let mut date_formats = p.date.all_formats();
+    if date_formats.len() > 1 {
+        let values: Vec<&str> = records
+            .iter()
+            .map(|r| cell(&index, r, &p.date.column).trim())
+            .filter(|v| !v.is_empty())
+            .collect();
+        if let Some(f) = pick_date_format(&values, &date_formats, false) {
+            date_formats = vec![f];
+        }
+    }
+    let skip_status: Vec<String> = p
+        .status
+        .as_ref()
+        .map(|st| st.skip.iter().map(|v| v.trim().to_lowercase()).collect())
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
+    for (row_idx, record) in records.iter().enumerate() {
         // Skip stray fully-empty records.
         if record.iter().all(|c| c.trim().is_empty()) {
             continue;
         }
+        if let Some(st) = &p.status {
+            let v = cell(&index, record, &st.column).trim().to_lowercase();
+            if skip_status.contains(&v) {
+                continue;
+            }
+        }
         let row = row_idx + 1;
-        let txn = parse_record(
+        match parse_record(
             profile,
             &index,
-            &record,
+            record,
             &date_formats,
             &currency,
             &base,
             row,
-        )?;
-        out.push(txn);
+        ) {
+            Ok(txn) => out.push(txn),
+            // Balance lines, totals and footers: skipped when the layout allows it.
+            Err(_) if lay.lenient => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     Ok(out)
+}
+
+/// Columns a headerless file may have ("1" … this).
+const MAX_POSITIONAL_COLUMNS: usize = 64;
+
+/// Plausible statement years: guards against `%Y` reading "24" as the year 24.
+fn plausible(d: Date) -> bool {
+    (1900..=3100).contains(&d.year())
+}
+
+/// Parse a date cell with one format, accepting a trailing clock time.
+pub(crate) fn parse_date_with(fmt: &str, v: &str) -> Option<Date> {
+    let one = |v: &str| {
+        Date::strptime(fmt.as_bytes(), v.as_bytes())
+            .ok()
+            .filter(|d| plausible(*d))
+    };
+    one(v).or_else(|| strip_time_suffix(v).and_then(one))
+}
+
+/// The one format (of `formats`, in order) that reads every value, preferring one
+/// under which the dates run in order (statements are sorted, a misread day/month
+/// order scrambles them). `day_first` breaks a remaining tie toward a format whose
+/// day comes before its month. `None` when no format reads them all.
+pub(crate) fn pick_date_format(
+    values: &[&str],
+    formats: &[String],
+    day_first: bool,
+) -> Option<String> {
+    let mut readers: Vec<(&String, Vec<Date>)> = Vec::new();
+    for f in formats {
+        let dates: Option<Vec<Date>> = values.iter().map(|v| parse_date_with(f, v)).collect();
+        if let Some(d) = dates {
+            readers.push((f, d));
+        }
+    }
+    if readers.is_empty() {
+        return None;
+    }
+    let sorted =
+        |d: &[Date]| d.windows(2).all(|w| w[0] <= w[1]) || d.windows(2).all(|w| w[0] >= w[1]);
+    let ordered: Vec<&(&String, Vec<Date>)> = readers.iter().filter(|(_, d)| sorted(d)).collect();
+    let pool: Vec<&(&String, Vec<Date>)> = if ordered.is_empty() {
+        readers.iter().collect()
+    } else {
+        ordered
+    };
+    // All candidates read the same dates (e.g. padded vs unpadded): the first wins.
+    let first = pool[0];
+    if pool.iter().all(|(_, d)| *d == first.1) {
+        return Some(first.0.clone());
+    }
+    let dayish = |f: &str| {
+        let (d, m) = (
+            f.find("%d").or_else(|| f.find("%-d")),
+            f.find("%m")
+                .or_else(|| f.find("%-m"))
+                .or_else(|| f.find("%b"))
+                .or_else(|| f.find("%B")),
+        );
+        matches!((d, m), (Some(d), Some(m)) if d < m)
+    };
+    pool.iter()
+        .find(|(f, _)| dayish(f) == day_first)
+        .or(pool.first())
+        .map(|(f, _)| (*f).clone())
 }
 
 /// Fetch a cell by configured column name. The column's presence was validated
@@ -248,7 +372,7 @@ fn merchant_text(
 /// time (12/24h, optional seconds/fraction, AM/PM, `T` separator, `Z`/offset)
 /// removed, or `None` when there is none. Lets every date format also accept
 /// exports that stamp a (usually meaningless) time onto the date.
-fn strip_time_suffix(s: &str) -> Option<&str> {
+pub(crate) fn strip_time_suffix(s: &str) -> Option<&str> {
     // INVARIANT: a constant pattern (covered by tests); it always compiles.
     #[allow(clippy::expect_used)]
     static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -269,12 +393,9 @@ fn parse_date_time(
     formats: &[String],
     row: usize,
 ) -> Result<(Date, Option<Time>), ParseError> {
-    let try_all = |v: &str| {
-        formats
-            .iter()
-            .find_map(|fmt| Date::strptime(fmt.as_bytes(), v.as_bytes()).ok())
-    };
-    let date = try_all(date_raw).or_else(|| strip_time_suffix(date_raw).and_then(try_all));
+    let date = formats
+        .iter()
+        .find_map(|fmt| parse_date_with(fmt, date_raw));
     let date = date.ok_or_else(|| ParseError::Date {
         profile: p.id.clone(),
         row,
@@ -316,12 +437,14 @@ fn parse_amount(
     let p = &profile.profile;
     let parse = |val: &str| -> Result<Money, ParseError> {
         let v = val.trim();
-        v.parse::<Money>().map_err(|source| ParseError::Amount {
-            profile: p.id.clone(),
-            row,
-            value: v.to_string(),
-            source,
-        })
+        clean_amount(v, p.amount.decimal_comma)
+            .parse::<Money>()
+            .map_err(|source| ParseError::Amount {
+                profile: p.id.clone(),
+                row,
+                value: v.to_string(),
+                source,
+            })
     };
 
     match p.amount.sign {
@@ -334,7 +457,20 @@ fn parse_amount(
                     column: p.amount.column.clone(),
                 });
             }
-            parse(raw)
+            let m = parse(raw)?;
+            // Unsigned amount + a direction column ("Debit"/"Credit").
+            match &p.amount.direction {
+                Some(d) => {
+                    let v = cell(index, record, &d.column).trim();
+                    let out = d.outflow.iter().any(|o| o.eq_ignore_ascii_case(v));
+                    Ok(Money::new(if out {
+                        -m.amount().abs()
+                    } else {
+                        m.amount().abs()
+                    }))
+                }
+                None => Ok(m),
+            }
         }
         Sign::OutflowPositive => {
             let raw = cell(index, record, &p.amount.column).trim();
@@ -347,10 +483,20 @@ fn parse_amount(
             let credit_col = p.amount.credit_column.as_deref().unwrap_or("");
             let debit = cell(index, record, debit_col).trim();
             let credit = cell(index, record, credit_col).trim();
-            if !debit.is_empty() {
-                Ok(Money::new(-parse(debit)?.amount()))
-            } else if !credit.is_empty() {
-                parse(credit)
+            // Money out is the debit, money in the credit, whatever sign a bank
+            // writes them with; a row with both (rare) nets them.
+            if !debit.is_empty() || !credit.is_empty() {
+                let d = if debit.is_empty() {
+                    Decimal::ZERO
+                } else {
+                    parse(debit)?.amount().abs()
+                };
+                let c = if credit.is_empty() {
+                    Decimal::ZERO
+                } else {
+                    parse(credit)?.amount().abs()
+                };
+                Ok(Money::new(c - d))
             } else {
                 Err(ParseError::EmptyField {
                     profile: p.id.clone(),
@@ -360,6 +506,38 @@ fn parse_amount(
             }
         }
     }
+}
+
+/// An amount cell as a plain decimal string: currency symbols and codes, spaces
+/// and thousands separators dropped; `(12.50)` and `12.50-` are negative; with
+/// `decimal_comma`, `1.234,56` → `1234.56`.
+pub(crate) fn clean_amount(raw: &str, decimal_comma: bool) -> String {
+    let mut t = raw.trim();
+    let mut neg = false;
+    if let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
+        neg = true;
+        t = inner.trim();
+    }
+    if let Some(inner) = t.strip_suffix('-') {
+        neg = !neg;
+        t = inner.trim();
+    }
+    let kept: String = t
+        .chars()
+        .filter(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+'))
+        .collect();
+    let mut num = if decimal_comma {
+        kept.replace('.', "").replace(',', ".")
+    } else {
+        kept.replace(',', "")
+    };
+    if neg {
+        num = match num.strip_prefix('-') {
+            Some(pos) => pos.to_string(),
+            None => format!("-{}", num.trim_start_matches('+')),
+        };
+    }
+    num
 }
 
 /// Kind from the type column's map, else from the amount's sign (`by_sign`),
@@ -402,6 +580,51 @@ fn strip_card_quote(s: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleans_amounts() {
+        assert_eq!(clean_amount("$1,234.56", false), "1234.56");
+        assert_eq!(clean_amount("(12.50)", false), "-12.50");
+        assert_eq!(clean_amount("12.50-", false), "-12.50");
+        assert_eq!(clean_amount("-£3.00", false), "-3.00");
+        assert_eq!(clean_amount("1.234,56 €", true), "1234.56");
+        assert_eq!(clean_amount("-7,5", true), "-7.5");
+        assert_eq!(clean_amount("CAD 9.99", false), "9.99");
+    }
+
+    #[test]
+    fn picks_one_date_order_for_the_whole_file() {
+        let f = |v: &[&str], day_first| {
+            pick_date_format(v, &["%m/%d/%Y".into(), "%d/%m/%Y".into()], day_first)
+        };
+        // 25/09 only reads day-first, so 03/09 is 3 September too.
+        assert_eq!(
+            f(&["01/09/2999", "03/09/2999", "25/09/2999"], false).as_deref(),
+            Some("%d/%m/%Y")
+        );
+        assert_eq!(
+            f(&["09/01/2999", "09/03/2999", "09/25/2999"], false).as_deref(),
+            Some("%m/%d/%Y")
+        );
+        // Ambiguous, but only day-first keeps them in order.
+        assert_eq!(
+            f(&["11/01/2999", "02/02/2999", "05/03/2999"], false).as_deref(),
+            Some("%d/%m/%Y")
+        );
+        // Truly ambiguous: the preference decides.
+        assert_eq!(f(&["01/02/2999"], true).as_deref(), Some("%d/%m/%Y"));
+        assert_eq!(f(&["01/02/2999"], false).as_deref(), Some("%m/%d/%Y"));
+        // Two-digit years aren't read as the year 24.
+        assert_eq!(
+            pick_date_format(
+                &["09/05/24"],
+                &["%m/%d/%Y".into(), "%m/%d/%y".into()],
+                false
+            )
+            .as_deref(),
+            Some("%m/%d/%y")
+        );
+    }
 
     #[test]
     fn strips_card_quotes() {

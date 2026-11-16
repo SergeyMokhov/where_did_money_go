@@ -188,6 +188,7 @@ fn is_card(leg: &Leg<'_>, config: &Config) -> bool {
             .profiles
             .iter()
             .any(|p| p.profile.id == leg.item.txn.profile_id && card(&p.profile.account.kind))
+        || crate::ingest::infer::kind_of(&leg.item.txn.profile_id).is_some_and(card)
 }
 
 /// Confidence that two legs are the same internal move. Higher is better.

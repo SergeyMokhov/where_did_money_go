@@ -3,7 +3,7 @@
 //! Phase 1 (this crate) provides the foundation: the domain [`model`], a typed
 //! [`error`] hierarchy, [`config`] loading/validation, CSV [`ingest`], merchant
 //! [`normalize`]ation, and cross-file [`dedup`]. Later phases (categorize,
-//! identity, reconcile, analytics, emit, report) build on these public APIs.
+//! identity, reconcile, analytics, emit) build on these public APIs.
 //!
 //! Design notes for later phases:
 //! - Money is [`model::Money`] (a `Decimal` newtype), never `f64`; it serializes
@@ -29,7 +29,6 @@ pub mod model;
 pub mod normalize;
 pub mod pipeline;
 pub mod reconcile;
-pub mod report;
 
 pub use categorize::{Assignment, Categorizer, EffectiveKind};
 pub use config::Config;
@@ -40,4 +39,3 @@ pub use ingest::{load_dir, load_file, load_files, LoadReport};
 pub use model::{Currency, Money, Transaction, TxnType};
 pub use normalize::normalize_merchant;
 pub use pipeline::{analyze, analyze_files, AnalyzeOutcome};
-pub use report::{write_report, Insights};

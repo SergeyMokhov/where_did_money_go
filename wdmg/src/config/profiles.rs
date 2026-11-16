@@ -67,8 +67,22 @@ pub struct Profile {
     /// Optional person/cardholder column.
     #[serde(default)]
     pub person: Option<PersonSpec>,
+    /// Rows to leave out by a status column (e.g. pending or reverted ones).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<StatusSpec>,
     /// Account metadata.
     pub account: AccountSpec,
+}
+
+/// `[profile.status]`: skip rows whose `column` holds one of `skip`
+/// (case-insensitive), e.g. `column = "State"`, `skip = ["PENDING", "REVERTED"]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusSpec {
+    /// The status column.
+    pub column: String,
+    /// Values whose rows are skipped.
+    #[serde(default)]
+    pub skip: Vec<String>,
 }
 
 /// Detection rules (`[profile.match]`).
@@ -121,6 +135,25 @@ pub struct Layout {
     /// Field delimiter; defaults to comma.
     #[serde(default)]
     pub delimiter: Option<char>,
+    /// Lines above the header to skip (an account summary some banks put first).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub header_row: usize,
+    /// The file has no header row; columns are named by position: "1", "2", …
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub headerless: bool,
+    /// Skip rows whose date or amount can't be read (balance lines, footers)
+    /// instead of rejecting the file.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub lenient: bool,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Date column + strptime format(s) (`[profile.date]`).
@@ -181,6 +214,22 @@ pub struct AmountSpec {
     /// Credit column when `sign = separate_debit_credit`.
     #[serde(default)]
     pub credit_column: Option<String>,
+    /// Amounts use a decimal comma (`1.234,56`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub decimal_comma: bool,
+    /// Unsigned amounts whose direction is in another column (e.g. a
+    /// "Credit Debit Indicator"): a value in `outflow` makes the row negative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<DirectionSpec>,
+}
+
+/// `[profile.amount.direction]`: `column` + the (case-insensitive) values that mean money out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectionSpec {
+    /// The column holding the direction.
+    pub column: String,
+    /// Values meaning money out.
+    pub outflow: Vec<String>,
 }
 
 /// Merchant column + cleanup (`[profile.merchant]`).

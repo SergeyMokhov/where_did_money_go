@@ -9,6 +9,7 @@
 //!   logic, so both classify and report files identically.
 
 pub mod detect;
+pub mod infer;
 pub mod reader;
 
 use std::path::{Path, PathBuf};
@@ -38,7 +39,7 @@ pub fn load_bytes(
 ) -> Result<Vec<Transaction>, IngestError> {
     let text = detect::decode(label, bytes)?;
     let profile = detect_text(config, label, text)?;
-    read_text(profile, label, text)
+    read_text(&profile, label, text)
 }
 
 /// Outcome of loading a directory: parsed transactions plus a per-file report so
@@ -81,7 +82,8 @@ fn ingest_one(
     let detected = bytes.and_then(|b| {
         let text = detect::decode(label, b)?;
         let profile = detect_text(config, label, text)?;
-        Ok((profile, read_text(profile, label, text)))
+        let rows = read_text(&profile, label, text);
+        Ok((profile, rows))
     });
     match detected {
         Ok((profile, Ok(mut rows))) => {

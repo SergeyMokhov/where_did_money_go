@@ -31,10 +31,10 @@ fn parses_mastercard_credit_row() {
     let c = cfg();
     let txns = load_file(&c, &fixtures().join("mastercard_credit_7001.csv")).unwrap();
     let first = &txns[0];
-    assert_eq!(first.date, date(2026, 1, 19));
+    assert_eq!(first.date, date(2998, 1, 19));
     assert_eq!(
         first.amount,
-        Money::new(Decimal::from_str("-21.72").unwrap())
+        Money::new(Decimal::from_str("-64.83").unwrap())
     );
     assert_eq!(first.txn_type, TxnType::Spend);
     assert_eq!(first.normalized_merchant, "AMAZON");
@@ -50,7 +50,7 @@ fn detects_rewards_credit_and_harvests_category() {
     let p = detect(&c, &path).unwrap();
     assert_eq!(p.profile.id, "rewards_credit");
     let txns = load_file(&c, &path).unwrap();
-    assert_eq!(txns[0].date, date(2025, 4, 17));
+    assert_eq!(txns[0].date, date(2999, 4, 17));
     assert_eq!(
         txns[0].harvested_category.as_deref(),
         Some("Foreign Currency Spend")
@@ -65,17 +65,17 @@ fn bank_ledger_handles_both_padded_and_unpadded_dates() {
     let chequing = fixtures().join("ledger_debit_2025.csv");
     assert_eq!(detect(&c, &chequing).unwrap().profile.id, "bank_ledger");
     let chequing_txns = load_file(&c, &chequing).unwrap();
-    assert_eq!(chequing_txns[0].date, date(2025, 1, 2));
+    assert_eq!(chequing_txns[0].date, date(2999, 1, 2));
     assert_eq!(
         chequing_txns[0].amount,
-        Money::new(Decimal::from_str("-2425.00").unwrap())
+        Money::new(Decimal::from_str("-1999.00").unwrap())
     );
 
     let sav = fixtures().join("rewards_savings_2020.csv");
     assert_eq!(detect(&c, &sav).unwrap().profile.id, "bank_ledger");
     let sav_txns = load_file(&c, &sav).unwrap();
-    // Non-leading-zero date 1/20/2020 parses.
-    assert_eq!(sav_txns[0].date, date(2020, 1, 20));
+    // Non-leading-zero date 1/20/2995 parses.
+    assert_eq!(sav_txns[0].date, date(2995, 1, 20));
     assert_eq!(
         sav_txns[0].normalized_merchant,
         "EFT WITHDRAWAL TO WATERWORKS"
@@ -93,9 +93,9 @@ fn first_bank_card_bom_blank_rows_leading_space_and_code_prefix() {
     assert_eq!(txns.len(), 1, "two blank rows must be skipped");
     let t = &txns[0];
     // %Y%m%d date.
-    assert_eq!(t.date, date(2026, 1, 2));
-    // -40.0 parses exactly; leading-space header column handled.
-    assert_eq!(t.amount, Money::new(Decimal::from_str("-40.0").unwrap()));
+    assert_eq!(t.date, date(2998, 1, 2));
+    // -41.1 parses exactly; leading-space header column handled.
+    assert_eq!(t.amount, Money::new(Decimal::from_str("-41.1").unwrap()));
     assert_eq!(t.txn_type, TxnType::Spend);
     // [CW] prefix stripped, whitespace collapsed, uppercased.
     assert!(t
@@ -112,7 +112,7 @@ fn first_bank_card_bom_blank_rows_leading_space_and_code_prefix() {
 fn dedup_collapses_cross_file_keeps_in_file() {
     let c = cfg();
     let mut all = Vec::new();
-    // ledger_debit_2025 has SHELL -40.00 on 01/03; overlap file repeats it (cross-file
+    // ledger_debit_2025 has SHELL -41.13 on 01/03; overlap file repeats it (cross-file
     // dup) plus two identical TIM HORTONS rows (in-file dups to keep).
     all.extend(load_file(&c, &fixtures().join("ledger_debit_2025.csv")).unwrap());
     all.extend(load_file(&c, &fixtures().join("ledger_debit_overlap.csv")).unwrap());
@@ -174,7 +174,7 @@ fn missing_column_is_a_typed_error_not_a_panic() {
 
     let c = cfg();
     let p = detect(&c, &path).unwrap();
-    let err = wdmg::ingest::read_file(p, &path).unwrap_err();
+    let err = wdmg::ingest::read_file(&p, &path).unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("Amount"),

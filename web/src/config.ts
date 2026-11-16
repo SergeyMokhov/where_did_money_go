@@ -2,15 +2,17 @@
 // live in this browser's IndexedDB. Uploads are read locally with the File API;
 // downloads are generated in-page — no file ever leaves the browser.
 import { DEMO_ID, resetDemo } from './demo';
-import { checkProject, defaultConfig, type FileCheck } from './engine';
+import { analyzeProject, checkProject, defaultConfig, type FileCheck } from './engine';
 import { openMapper } from './mapper';
 import { openPeopleEditor } from './people';
 import { openRulesEditor } from './rules';
 import { MAX_FILE_BYTES, exportBundle, exportZip, importZip, readZipEntries, type BundleKind } from './zip';
 import {
-  CONFIG_NAMES, INSIGHTS_NAME, deleteProject, getActiveId, listProjects, newId,
-  removeFile, roleFor, saveProject, setActiveId, upsertFile, type ProjectDoc,
+  CONFIG_NAMES, INSIGHTS_NAME, deleteProject, getActiveId, getProject, listProjects, lockProject, newId,
+  protectProject, removeFile, roleFor, saveProject, setActiveId, unlockProject, unprotectProject, upsertFile, type ProjectDoc,
 } from './store';
+import { askNewPassphrase, openPrivacyNote, unlockForm } from './privacy';
+import { aiSummary } from './aisummary';
 
 
 const CONFIG_HELP: Record<string, string> = {
@@ -81,7 +83,9 @@ async function render() {
   const projects = await listProjects();
   const activeId = (await getActiveId()) || DEMO_ID;
   if (!projects.some((p) => p.id === selectedId)) selectedId = activeId;
-  const sel = projects.find((p) => p.id === selectedId) || projects[0];
+  const listed = projects.find((p) => p.id === selectedId) || projects[0];
+  // The selected project with its files (decrypted when it's protected and unlocked).
+  const sel = listed ? (await getProject(listed.id)) ?? listed : undefined;
 
   const closeBtn = document.getElementById('config-close')!;
   closeBtn.textContent = changed ? '← Back to report (re-analyze)' : '← Back to report';
@@ -128,7 +132,9 @@ function projectList(projects: ProjectDoc[], activeId: string): HTMLElement {
       h('div', { class: 'cfg-proj-name' }, p.name,
         ...(p.id === activeId ? [h('span', { class: 'cfg-badge' }, 'showing')] : []),
         ...(p.demo ? [h('span', { class: 'cfg-badge muted' }, p.demo.modified ? 'demo · modified' : 'demo')] : [])),
-      h('div', { class: 'muted cfg-proj-sub' }, `${nData} statement file${nData === 1 ? '' : 's'} · saved ${fmtDate(p.savedAt)}`),
+      h('div', { class: 'muted cfg-proj-sub' }, p.sealed
+        ? `${p.locked ? '🔒 encrypted, locked' : '🔓 encrypted, unlocked'} · saved ${fmtDate(p.savedAt)}`
+        : `${nData} statement file${nData === 1 ? '' : 's'} · saved ${fmtDate(p.savedAt)}`),
     );
     const pick = async () => { selectedId = p.id; await render(); };
     item.addEventListener('click', pick);
@@ -144,9 +150,102 @@ function projectList(projects: ProjectDoc[], activeId: string): HTMLElement {
   );
 }
 
+function lockedDetail(doc: ProjectDoc): HTMLElement {
+  return h('div', { class: 'panel cfg-right' },
+    h('div', { class: 'cfg-detail-head' }, h('h2', { class: 'cfg-h' }, doc.name)),
+    unlockForm(doc.name, (p) => unlockProject(doc.id, p), () => { changed = true; void render(); }),
+    h('p', { class: 'muted cfg-note' }, 'Its statements, configuration and insights are stored encrypted. Forgot the passphrase? The data can’t be recovered — import an exported backup as a new project, then delete this one.'),
+    h('div', { class: 'cfg-actions' }, btn('✕ Delete project', async () => {
+      if (!confirm(`Delete the encrypted project "${doc.name}" from this browser? This can't be undone.`)) return;
+      await deleteProject(doc.id); selectedId = null; changed = true; toast('Project deleted.'); await render();
+    }, 'btn danger')));
+}
+
+const DAY = 86_400_000;
+/** Unsorted-transaction count per project version (an analysis is too slow to repeat on every render). */
+const unsortedCache = new Map<string, number>();
+function unsortedCount(doc: ProjectDoc): number | null {
+  const k = `${doc.id}@${doc.savedAt}`;
+  if (!unsortedCache.has(k)) {
+    try {
+      const tx = analyzeProject(doc).analysis.transactions || [];
+      unsortedCache.set(k, tx.filter((t: { kind: string; category?: string }) => t.kind !== 'transfer' && (!t.category || t.category === 'Uncategorized')).length);
+    } catch { return null; }
+  }
+  return unsortedCache.get(k)!;
+}
+
+/** "Getting started": the steps from an empty project to a useful report, ticked off as they're done. */
+function checklist(doc: ProjectDoc, s: { files: number; unreadable: number; orphans: number },
+  actions: { people: () => HTMLElement; rules: () => HTMLElement; export: () => Promise<void>; protect: () => Promise<void> }): HTMLElement | null {
+  const unsorted = s.files && !s.unreadable && !s.orphans ? unsortedCount(doc) : null;
+  const steps: { done: boolean; title: string; how: (Node | string)[] }[] = [
+    { done: s.files > 0, title: 'Add your statement exports',
+      how: ['On your bank’s website, open an account’s transactions and look for “Download” or “Export” → CSV. Take as much history as it offers; one file per account or card is fine, and overlapping downloads are de-duplicated. Drop the files below.'] },
+    { done: s.files > 0 && !s.unreadable, title: 'Make every file readable',
+      how: ['Most bank and card exports are read automatically. A file the app can’t make sense of shows ⚠ — use “Map columns…” on it to say which column is the date, amount and description.'] },
+    { done: s.files > 0 && !s.orphans, title: 'Say whose each account is',
+      how: ['Group the files into accounts and people, so transfers between them are recognised. ', actions.people()] },
+    { done: unsorted === 0, title: 'Sort transactions into categories',
+      how: [unsorted ? `${unsorted.toLocaleString()} transactions aren’t in a category yet. ` : 'Once the steps above are done, sort what the built-in categories don’t catch. ', actions.rules()] },
+    { done: !!doc.backupAt, title: 'Keep a backup',
+      how: ['The project lives only in this browser. ', btn('⇩ Export backup', actions.export, 'btn small')] },
+    { done: !!doc.sealed, title: 'Optional: protect it with a passphrase',
+      how: ['Stores the project encrypted, so other pages on this address, extensions and other users of this computer can’t read it. ', btn('🔒 Protect…', actions.protect, 'btn small')] },
+  ];
+  const done = steps.filter((x) => x.done).length;
+  if (done === steps.length) return null;
+  const first = steps.findIndex((x) => !x.done);
+  const det = h('details', { class: 'cfg-start', ...(done < 4 ? { open: '' } : {}) },
+    h('summary', {}, h('b', {}, 'Getting started'), h('span', { class: 'muted' }, ` · ${done} of ${steps.length} done`)),
+    h('ol', {}, ...steps.map((x, i) => h('li', { class: x.done ? 'done' : i === first ? 'next' : '' },
+      h('span', { class: 'cfg-start-t' }, `${x.done ? '✓' : '○'} ${x.title}`),
+      ...(x.done ? [] : [h('div', { class: 'muted cfg-start-how' }, ...x.how)])))));
+  return det;
+}
+/** Encryption, backup and storage status of one project, with their actions. */
+function safetyBox(doc: ProjectDoc, isDemo: boolean, exportIt: () => Promise<void>, protect: () => Promise<void>): HTMLElement {
+  const enc = doc.sealed
+    ? h('div', { class: 'cfg-safe-row' }, h('span', { class: 'cfg-safe-ok' }, '🔒 Encrypted with a passphrase'),
+        h('span', { class: 'muted' }, ' · unlocked in this tab — lock it when you’re done'),
+        btn('Lock now', async () => { lockProject(doc.id); changed = true; toast('Locked. The passphrase is needed to open it again.'); await render(); }, 'btn small',
+          'Forget the key in this tab: the project needs its passphrase again'),
+        btn('Remove passphrase', async () => {
+          if (!confirm(`Store "${doc.name}" unencrypted again?`)) return;
+          await unprotectProject(doc); changed = true; toast('Passphrase removed — stored unencrypted.'); await render();
+        }, 'btn small'))
+    : h('div', { class: 'cfg-safe-row' }, h('span', { class: 'muted' }, isDemo ? 'Demo data — stored unencrypted.' : 'Stored unencrypted in this browser.'),
+        ...(isDemo ? [] : [btn('🔒 Protect with a passphrase…', protect, 'btn small active', 'Encrypt this project’s files in this browser')]));
+  const since = doc.backupAt ? Date.now() - doc.backupAt : Infinity;
+  const stale = !isDemo && doc.files.some((f) => f.role === 'data') && (!doc.backupAt || (doc.savedAt > doc.backupAt && since > 7 * DAY));
+  const backup = h('div', { class: 'cfg-safe-row' },
+    h('span', { class: stale ? 'cfg-safe-warn' : 'muted' },
+      doc.backupAt ? `Last backup: ${fmtDate(doc.backupAt)}${doc.savedAt > doc.backupAt ? ' — changed since' : ''}.` : 'Never backed up — this browser holds the only copy.'),
+    btn('⇩ Export backup (.zip)', exportIt, stale ? 'btn small active' : 'btn small', 'Everything in this project as one zip (not encrypted)'));
+  const persist = h('span', { class: 'muted' });
+  void navigator.storage?.persisted?.().then((ok) => {
+    persist.textContent = ok ? 'The browser keeps this site’s data persistently.' : 'The browser may clear this site’s data when space runs low — keep backups.';
+  }).catch(() => {});
+  return h('div', { class: 'cfg-safety' },
+    h('div', { class: 'cfg-safe-head' }, h('b', {}, 'Privacy & backup'), btn('How is my data kept?', openPrivacyNote, 'btn small')),
+    enc, backup, h('div', { class: 'cfg-safe-row' }, persist));
+}
+
 function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
+  if (doc.locked) return lockedDetail(doc);
   const isDemo = doc.id === DEMO_ID || !!doc.demo;
   const save = async () => { await saveProject(doc); changed = true; await render(); };
+  const protect = async () => {
+    const pass = await askNewPassphrase(doc.name);
+    if (!pass) return;
+    await protectProject(doc, pass); changed = true; toast('Encrypted. Keep the passphrase safe — and a backup.'); await render();
+  };
+  const exportIt = async () => {
+    download(`${safeName(doc.name)}.zip`, exportZip(doc), 'application/zip');
+    doc.backupAt = Date.now();
+    await saveProject(doc, { touch: false });
+    await render();
+  };
 
   // Header: name + actions.
   const nameIn = h('input', { type: 'text', value: doc.name, maxlength: '80', class: 'cfg-name' }) as HTMLInputElement;
@@ -159,8 +258,8 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
     btn(doc.id === activeId ? '▶ Showing in report' : '▶ Open in report', async () => {
       await setActiveId(doc.id); location.reload();
     }, doc.id === activeId ? 'btn active' : 'btn'),
-    btn('⇩ Export (.zip)', () => download(`${safeName(doc.name)}.zip`, exportZip(doc), 'application/zip'), 'btn',
-      'Everything in this project as one zip — give it to Claude for the AI-insights step, or keep as a backup.'),
+    btn('⇩ Export (.zip)', exportIt, 'btn',
+      'Everything in this project as one zip (not encrypted) — a backup, or for the optional AI-insights step.'),
     isDemo
       ? btn('↺ Reset demo', async () => {
           if (!doc.demo?.modified) { toast('The demo is already in its original state.'); return; }
@@ -261,15 +360,23 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
     if (checkErr) return h('span', { class: 'neg' }, 'Config problem — see below');
     const c = checks.find((x) => x.file === name);
     if (!c) return h('span', {}, '');
+    if (!c.error && c.profile?.startsWith('auto-')) {
+      // No configured format matched: the engine worked the columns out itself.
+      const what = c.profile.startsWith('auto-card-') ? 'card' : 'bank account';
+      return h('span', { class: 'cfg-ok', title: `Layout worked out from the file's columns (${c.profile}). Check the amounts and dates in the report; if they look wrong, use “Map columns…”.` },
+        `✓ read automatically (${what}) · ${c.rows} row${c.rows === 1 ? '' : 's'}`);
+    }
     if (!c.error) return h('span', { class: 'cfg-ok', title: `Format: ${c.profile}` }, `✓ ${c.profile} · ${c.rows} row${c.rows === 1 ? '' : 's'}`);
     return h('span', { class: 'neg', title: c.error }, c.unrecognized ? '⚠ Not recognised' : `✕ ${c.error.length > 90 ? c.error.slice(0, 90) + '…' : c.error}`);
   };
   const mapBtn = (name: string) => {
     const c = checks.find((x) => x.file === name);
-    if (!c?.unrecognized) return [];
+    const guessed = !c?.error && !!c?.profile?.startsWith('auto-');
+    if (!c?.unrecognized && !guessed) return [];
     const f = doc.files.find((x) => x.name === name)!;
     return [btn('Map columns…', async () => { if (await openMapper(doc, f)) { await save(); toast('Saved a new format to profiles.toml.'); } },
-      'btn small active', 'Tell the analyzer what each column of this file holds')];
+      guessed ? 'btn small' : 'btn small active',
+      guessed ? 'The layout was worked out automatically — map the columns yourself if amounts or dates look wrong' : 'Tell the analyzer what each column of this file holds')];
   };
   const dataTbl = h('table', { class: 'cfg-files' }, h('tbody', {},
     ...(data.length ? data.map((f) => {
@@ -311,15 +418,45 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
   });
   const cfgTbl = h('table', { class: 'cfg-files' }, h('tbody', {}, ...cfgRows));
 
-  // Insights.
+  // AI insights (optional): what to share, how, and where the result goes.
   const ins = doc.files.find((f) => f.name === INSIGHTS_NAME);
-  const insTbl = h('table', { class: 'cfg-files' }, h('tbody', {},
-    ins ? fileRow(INSIGHTS_NAME, fmtSize(ins.bytes.length), 'AI recommendations shown in the report', dlBtn(INSIGHTS_NAME, ins.bytes), removeBtn(INSIGHTS_NAME))
-      : fileRow(INSIGHTS_NAME, '—', 'none — export the project, ask Claude (where-did-money-go skill) to write insights for it, then upload the insights.json here')));
+  const insIn = h('input', { type: 'file', accept: '.json', hidden: '' }) as HTMLInputElement;
+  insIn.addEventListener('change', async () => {
+    const f = insIn.files?.[0];
+    insIn.value = '';
+    if (!f) return;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    try { JSON.parse(new TextDecoder().decode(bytes)); } catch (e) { toast(`${f.name} isn’t valid JSON: ${(e as Error).message}`, true); return; }
+    upsertFile(doc, INSIGHTS_NAME, bytes);
+    await save(); toast('Insights added — they show under Recommendations in the report.');
+  });
+  const insBox = h('div', { class: 'cfg-ai' },
+    h('p', { class: 'muted' }, 'An AI can read your figures and write a short summary and concrete ways to save, shown under Recommendations in the report. ',
+      h('b', {}, 'This is the only step where your data goes anywhere'), ' — and only because you hand a file to the AI yourself.'),
+    h('ol', {},
+      h('li', {}, h('b', {}, 'Choose what to share. '),
+        btn('⇩ Summary for AI (.json)', () => {
+          const a = analyzeProject(doc).analysis;
+          download(`${safeName(doc.name)}-ai-summary.json`, JSON.stringify(aiSummary(a, doc.name), null, 1), 'application/json');
+        }, 'btn small active', 'Totals by month, category and merchant, recurring charges and flags — no transactions, bank wording, account names or exact dates; people become “Person 1, 2…”'),
+        ' or ',
+        btn('⇩ Whole project (.zip)', exportIt, 'btn small', 'Everything — lets the AI also suggest category rules for unsorted transactions'),
+        h('div', { class: 'muted cfg-ai-note' }, 'The summary holds totals by month, category and merchant, recurring charges and unusual-activity flags — no transaction list, bank wording, account names or exact dates, and people become “Person 1, 2…”. Merchant names are included.')),
+      h('li', {}, h('b', {}, 'Give it to Claude Code '), 'with the ', h('code', {}, 'where-did-money-go'), ' skill installed and ask: ',
+        h('i', {}, '“write insights for this file”'), '. It writes an ', h('code', {}, 'insights.json'), '.'),
+      h('li', {}, h('b', {}, 'Upload the insights.json here. '), btn('⇪ Upload insights.json', () => insIn.click(), 'btn small'), insIn)),
+    h('table', { class: 'cfg-files' }, h('tbody', {},
+      ins ? fileRow(INSIGHTS_NAME, fmtSize(ins.bytes.length), 'shown under Recommendations in the report', dlBtn(INSIGHTS_NAME, ins.bytes), removeBtn(INSIGHTS_NAME))
+        : fileRow(INSIGHTS_NAME, '—', 'none yet'))));
 
   return h('div', { class: 'panel cfg-right' },
     h('div', { class: 'cfg-detail-head' }, nameIn, actions),
     ...(isDemo ? [h('div', { class: 'muted cfg-note' }, 'The demo can’t be deleted. Edit it freely — ↺ Reset demo restores the original files.')] : []),
+    ...(isDemo ? [] : [checklist(doc, { files: data.length, unreadable: badCount, orphans: orphanFiles },
+      { people: () => peopleBtn('👥 People & accounts…'), rules: () => btn('🏷 Categories & rules…', async () => {
+          if (await openRulesEditor(doc)) { await save(); toast('Saved categories & rules.'); }
+        }, 'btn small'), export: exportIt, protect })].filter((x): x is HTMLElement => !!x)),
+    safetyBox(doc, isDemo, exportIt, protect),
     drop, fileIn,
     h('h3', { class: 'cfg-h3' }, `Statements (${data.length})`, bundleBtns('data')),
     ...(badCount ? [h('div', { class: 'cfg-warn' }, `${badCount} file${badCount === 1 ? '' : 's'} can’t be read yet. Use “Map columns…” to teach the analyzer an unrecognised layout.`)] : []),
@@ -329,6 +466,6 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
       peopleBtn('Assign accounts…', 'btn small active'))] : []),
     dataTbl,
     h('h3', { class: 'cfg-h3' }, 'Configuration', h('span', { class: 'cfg-h3-btns' }, peopleBtn('👥 People & accounts…'), rulesBtn, bundleBtns('config'))), cfgTbl,
-    h('h3', { class: 'cfg-h3' }, 'AI insights'), insTbl,
+    h('h3', { class: 'cfg-h3' }, '✨ AI insights (optional)'), insBox,
   );
 }

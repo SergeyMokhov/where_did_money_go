@@ -1,5 +1,6 @@
 //! Profile detection: choose the first profile whose match rules all succeed.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use crate::config::{CompiledProfile, Config};
@@ -130,7 +131,10 @@ pub fn basename(path: &Path) -> String {
 
 /// Select the first profile that matches the file at `path`, or a typed error
 /// listing why each profile was rejected. Thin fs wrapper over [`detect_text`].
-pub fn detect<'c>(config: &'c Config, path: &Path) -> Result<&'c CompiledProfile, IngestError> {
+pub fn detect<'c>(
+    config: &'c Config,
+    path: &Path,
+) -> Result<Cow<'c, CompiledProfile>, IngestError> {
     let content = std::fs::read_to_string(path).map_err(|source| IngestError::Read {
         path: path.to_path_buf(),
         source,
@@ -138,23 +142,31 @@ pub fn detect<'c>(config: &'c Config, path: &Path) -> Result<&'c CompiledProfile
     detect_text(config, path, &content)
 }
 
-/// Select the first profile that matches a file named `label` (its basename is
+/// Select the first profile that matches a file named (else one inferred from
+/// its contents; see [`super::infer`]) a file named `label` (its basename is
 /// matched against filename rules) whose decoded contents are `content`.
 pub fn detect_text<'c>(
     config: &'c Config,
     label: &Path,
     content: &str,
-) -> Result<&'c CompiledProfile, IngestError> {
+) -> Result<Cow<'c, CompiledProfile>, IngestError> {
     let (header, data) = read_head(label, content, PROBE_ROWS)?;
     let base = basename(label);
 
     let mut reasons = Vec::new();
     for profile in &config.profiles {
         match rejection_reason(profile, header, &data, &base) {
-            None => return Ok(profile),
+            None => return Ok(Cow::Borrowed(profile)),
             Some(r) => reasons.push(r),
         }
     }
+    // No configured format: work the layout out from the file itself.
+    if let Some(p) = super::infer::infer(config, strip_bom(content)) {
+        if let Ok(c) = CompiledProfile::compile(p) {
+            return Ok(Cow::Owned(c));
+        }
+    }
+    reasons.push("auto: no date, amount and description columns found".into());
     Err(IngestError::NoProfileMatch {
         path: label.to_path_buf(),
         reasons: reasons.join("; "),

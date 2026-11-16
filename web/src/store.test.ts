@@ -2,9 +2,11 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import { DEMO_ID, ensureDemo, resetDemo } from './demo';
 import {
-  deleteProject, getActiveId, getProject, listProjects, newId, roleFor, saveProject, setActiveId, upsertFile,
-  type ProjectDoc,
+  deleteProject, getActiveId, getProject, listProjects, lockProject, newId, protectProject, roleFor, saveProject, setActiveId,
+  unlockProject, unprotectProject, upsertFile, type ProjectDoc,
 } from './store';
+import { get } from 'idb-keyval';
+import { decodeFiles, encodeFiles } from './crypto';
 
 const enc = new TextEncoder();
 
@@ -98,5 +100,54 @@ describe('bundles', async () => {
     const data = readZipEntries(exportBundle(doc, 'data')!);
     expect(data.entries.map((e) => e.name)).toEqual(['a.csv']);
     expect(exportBundle({ ...doc, files: [] }, 'config')).toBeNull();
+  });
+});
+
+describe('passphrase encryption', () => {
+  it('round-trips files through the encoding', () => {
+    const files = [{ name: 'a.csv', role: 'data' as const, addedAt: 5, bytes: enc.encode('x,y\n1,2') }, { name: 'people.toml', role: 'config' as const, addedAt: 6, bytes: new Uint8Array() }];
+    expect(decodeFiles(encodeFiles(files))).toEqual(files);
+  });
+  it('stores a protected project only encrypted, and needs the passphrase to read it', async () => {
+    const id = newId();
+    const doc: ProjectDoc = { id, name: 'Secret', files: [], createdAt: 1, savedAt: 1 };
+    upsertFile(doc, 'bank.csv', enc.encode('Date,Amount\n2999-01-01,-12.34 SLURM'));
+    await saveProject(doc);
+    await protectProject(doc, 'correct horse battery');
+    // At rest: no files, and the ciphertext doesn't contain the statement text.
+    const { createStore } = await import('idb-keyval');
+    const stored = await get<ProjectDoc>(id, createStore('wdmg-projects', 'projects'));
+    expect(stored!.files).toEqual([]);
+    expect(new TextDecoder().decode(stored!.sealed!.data)).not.toContain('SLURM');
+    // Unlocked in this tab: reads and saves transparently (a new IV each save).
+    const open = await getProject(id);
+    expect(open!.locked).toBe(false);
+    expect(open!.files[0].name).toBe('bank.csv');
+    const iv1 = open!.sealed!.iv;
+    upsertFile(open!, 'more.csv', enc.encode('a'));
+    await saveProject(open!);
+    expect((await getProject(id))!.files.map((f) => f.name)).toEqual(['bank.csv', 'more.csv']);
+    expect((await getProject(id))!.sealed!.iv).not.toEqual(iv1);
+    // Locked: no files, can't be saved, the list says so.
+    lockProject(id);
+    const shut = await getProject(id);
+    expect(shut!.locked).toBe(true);
+    expect(shut!.files).toEqual([]);
+    await expect(saveProject(shut!)).rejects.toThrow(/locked/);
+    expect((await listProjects()).find((p) => p.id === id)!.locked).toBe(true);
+    // Wrong passphrase fails; the right one unlocks.
+    await expect(unlockProject(id, 'wrong horse battery')).rejects.toThrow(/Wrong passphrase/);
+    const back = await unlockProject(id, 'correct horse battery');
+    expect(back.files.length).toBe(2);
+    // Removing the passphrase stores it in the clear again.
+    await unprotectProject(back);
+    const plain = await getProject(id);
+    expect(plain!.sealed).toBeUndefined();
+    expect(plain!.files.length).toBe(2);
+  });
+  it('refuses short passphrases and the demo', async () => {
+    const doc: ProjectDoc = { id: newId(), name: 'x', files: [], createdAt: 1, savedAt: 1 };
+    await expect(protectProject(doc, 'short')).rejects.toThrow(/8 characters/);
+    await expect(protectProject({ ...doc, demo: { version: 1, modified: false } }, 'long enough pass')).rejects.toThrow(/demo/);
   });
 });
