@@ -303,13 +303,13 @@ currency = "CAD"
 fn dates_with_a_time_suffix_and_multi_column_descriptions() {
     let cfg = cfg_with(MULTI_DESC).expect("profile builds");
     let csv = "ID,Date,Account Name,Description1,Description2,Description3,Amount,Balance\n\
-               1001,2026-03-31 12:00:00 AM,Savings - 0,\"Interest Credit\",\"Interest Amount 0.07\",,0.07,140.07\n\
+               1001,2999-03-31 12:00:00 AM,Savings - 0,\"Interest Credit\",\"Interest Amount 0.07\",,0.07,140.07\n\
                1002,2026-11-02T08:15:00Z,Savings - 0,Transfer out,,ref 77,-5.00,135.07\n\
                1003,2026-11-03,Savings - 0,Plain,,,1.00,21.94\n";
     let t =
         wdmg::ingest::load_bytes(&cfg, Path::new("savings.csv"), csv.as_bytes()).expect("parses");
     assert_eq!(t.len(), 3);
-    assert_eq!(t[0].date.to_string(), "2026-03-31");
+    assert_eq!(t[0].date.to_string(), "2999-03-31");
     assert_eq!(t[1].date.to_string(), "2026-11-02");
     assert_eq!(t[0].raw_description, "Interest Credit Interest Amount 0.07");
     assert_eq!(t[1].raw_description, "Transfer out ref 77");
@@ -329,12 +329,12 @@ fn a_time_suffix_never_rescues_a_bad_date() {
 fn split_description_ledger_is_a_builtin_format() {
     let cfg = wdmg::config::Config::from_defaults().expect("defaults");
     let csv = " ID, Date, Account Name, Description1, Description2, Description3, Amount, Balance\n\
-               100000001,2026-03-31 12:00:00 AM,Savings - 0,\"Interest Credit\",\"Interest Amount 0.07\",,0.07,140.07\n\
+               100000001,2999-03-31 12:00:00 AM,Savings - 0,\"Interest Credit\",\"Interest Amount 0.07\",,0.07,140.07\n\
                100000002,2026-11-02 12:00:00 AM,Savings - 0,\"Transfer Out\",\"To chequing\",,-5.00,135.07\n";
     let t = wdmg::ingest::load_bytes(&cfg, Path::new("download.csv"), csv.as_bytes())
         .expect("recognised");
     assert_eq!(t[0].profile_id, "split_description_ledger");
-    assert_eq!(t[0].date.to_string(), "2026-03-31");
+    assert_eq!(t[0].date.to_string(), "2999-03-31");
     assert_eq!(t[0].raw_description, "Interest Credit Interest Amount 0.07");
     assert_eq!(t[0].txn_type, TxnType::Income);
     assert_eq!(t[1].txn_type, TxnType::Spend);

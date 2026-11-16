@@ -244,7 +244,7 @@ fn merchant_text(
         .join(" ")
 }
 
-/// `"2026-03-31 12:00:00 AM"` → `"2026-03-31"`: the value with a trailing clock
+/// `"2999-03-31 12:00:00 AM"` → `"2999-03-31"`: the value with a trailing clock
 /// time (12/24h, optional seconds/fraction, AM/PM, `T` separator, `Z`/offset)
 /// removed, or `None` when there is none. Lets every date format also accept
 /// exports that stamp a (usually meaningless) time onto the date.

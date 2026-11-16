@@ -377,7 +377,7 @@ step(/id = "odd_bank_debit"/.test(stored) && /\[profile\.type\.by_sign\]/.test(s
 // A savings export with the description split over 3 columns (and a time on each
 // date) is a built-in format: recognised with no mapping.
 const sav = path.join(OUT, 'savings_export.csv');
-const savRows = '100000001,2026-03-31 12:00:00 AM,Savings - 0,"Interest Credit","Interest Amount 0.07",,0.07,140.07\n'
+const savRows = '100000001,2999-03-31 12:00:00 AM,Savings - 0,"Interest Credit","Interest Amount 0.07",,0.07,140.07\n'
   + '100000002,2026-11-03 12:00:00 AM,Savings - 0,"Transfer Out","To chequing",ref 9,-5.00,135.07\n';
 fs.writeFileSync(sav, 'ID, Date, Account Name, Description1, Description2, Description3, Amount, Balance\n' + savRows);
 await (await page.$('input[type=file][multiple]')).uploadFile(sav);
@@ -398,7 +398,7 @@ step(/YYYY-MM-DD/.test(dfmt) && /time part is ignored/.test(dfmt), 'date with a 
 await page.type('.map-bank', 'Some Bank');
 await page.waitForFunction(() => /Reads 2 rows/.test(document.querySelector('.map-result')?.textContent || ''), { timeout: 10000 });
 const p2 = await page.$$eval('.map-parsed tbody tr', (r) => r.map((x) => [...x.cells].map((c) => c.textContent).join('|')));
-step(p2.includes('2026-03-31|0.07|INTEREST CREDIT INTEREST AMOUNT 0.07|income') && p2.includes('2026-11-03|-5.00|TRANSFER OUT TO CHEQUING REF 9|spend'),
+step(p2.includes('2999-03-31|0.07|INTEREST CREDIT INTEREST AMOUNT 0.07|income') && p2.includes('2026-11-03|-5.00|TRANSFER OUT TO CHEQUING REF 9|spend'),
   'description columns are joined, dates parsed', JSON.stringify(p2));
 await clickText('.map-actions button', 'Save format');
 await page.waitForFunction(() => /✓ some_bank_debit · 2 rows/.test(document.body.textContent), { timeout: 10000 });

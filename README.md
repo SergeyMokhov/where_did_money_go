@@ -1,18 +1,20 @@
 # where-did-money-go
 
 A bank / credit / debit **statement analyzer** that ingests CSV exports from multiple
-banks, cards, and people, then produces a single **self-contained interactive HTML report**
+banks, cards, and people, then produces a single **self-contained interactive report**
 answering: *where did the money come from, where did it go, and how can I save?*
 
-It ships as a [Claude Code](https://claude.com/claude-code) **skill**, but the engine is a
-plain Rust CLI (`wdmg`) you can also run on its own.
+It comes three ways, all running the same Rust engine: an **offline browser app** (the engine
+compiled to WebAssembly), a [Claude Code](https://claude.com/claude-code) **skill**, and a
+plain Rust CLI (`wdmg`).
 
-**▶ [Live demo](https://sergeymokhov.github.io/where_did_money_go/)** — the full interactive
-report rendered from the bundled sample data. No install, no sign-up; it opens in your
-browser and contacts no network. The sample household (the *Futurama* crew, year 2999) keeps
-a few secrets buried in the numbers — slice by person, search the merchants, and follow the
-ⓘ hints to see if you can work out *where Bender's money really went* before the report spells
-it out.
+**▶ [Live demo](https://sergeymokhov.github.io/where_did_money_go/)** — the browser app,
+opened on the bundled sample data. No install, no sign-up, no server: it is one HTML file and
+contacts no network. Under **⚙ Configuration** you can create a project from your own CSV
+exports — they are analyzed in the page and stored only in your browser. The sample household
+(the *Futurama* crew, year 2999) keeps a few secrets buried in the numbers — slice by person,
+search the merchants, and follow the ⓘ hints to see if you can work out *where Bender's money
+really went* before the report spells it out.
 
 > The shipped example configuration is themed (Planet Express, New New York, …). It is a
 > **template** — replace it with your own. Your real, private config should live **outside
@@ -23,11 +25,13 @@ it out.
 ## What it does
 
 - **Reads many export formats** (auto-detected): a cardholder credit card, a rewards credit
-  card, a generic bank ledger (chequing/savings), and a fixed-width card statement. New banks
-  are added by editing config — **no recompile**.
+  card, a generic bank ledger (chequing/savings), a fixed-width card statement, and a ledger
+  whose description is split over several columns. New banks are added by editing config —
+  **no recompile** — or, in the browser app, with **Map columns…**.
 - **Deduplicates** overlapping exports (e.g. a full-history file plus a recent-only file) so
   nothing is double-counted; keeps legitimate same-day duplicates within one file.
-- **Categorizes** every transaction by configurable rules (most-specific match wins), with a
+- **Categorizes** every transaction by configurable rules (most-specific match wins, optional
+  amount ranges per rule, one-off transactions pinned by hand), with a
   `transfer` kind that nets credit-card payments and inter-account moves out of both flows —
   fixing the classic "my card payment looks like spending" double-count.
 - **Models a household**: people own multiple cards/accounts; **external accounts** (e.g. a
@@ -125,15 +129,41 @@ config and re-run to refine. Everything in the report is complete except the LLM
 
 ## Browser app (no regeneration needed)
 
-`web/` is the same report as a **single offline HTML app** that loads data sets itself.
-The Rust engine is compiled to WebAssembly and runs in the page, so the numbers are
-identical to the CLI's (verified by a deep-equal smoke test).
+`web/` is the same report as a **single offline HTML app** that loads data sets itself
+(it is what the live demo serves). The Rust engine is compiled to WebAssembly and runs in
+the page, so the numbers are identical to the CLI's (verified by a deep-equal smoke test).
 
 - **⚙ Configuration** manages *projects* (statement CSVs + config TOMLs + optional
   `insights.json`), stored in the browser's IndexedDB. You can upload and download
   individual files, export or import a project as a `.zip`, and create, rename or delete
   projects. The bundled **demo** project can't be deleted; **↺ Reset demo** restores it.
   No file leaves the browser.
+- **Map columns…** teaches the app a statement layout it doesn't recognise (pick the date,
+  amount and description columns); the format is saved in the project's `profiles.toml`.
+- **People & accounts** edits the household (`people.toml`) without writing TOML: who owns
+  which account, the account's kind, and which statement files it "picks up" — set up by
+  example with a guide that proposes a durable rule and previews exactly which files and rows
+  it catches. A health check flags files on no account, idle accounts and broken rules.
+- **Categories & rules** (⚙ Configuration, the report's "Sort them…" notice, or ✎ on any
+  transaction) edits `categories.toml` and the transfer rules:
+  - *To sort* lists uncategorized transactions; **Sort…** makes a rule from one. It shows
+    every transaction the text would catch, where each is now and where it would end up
+    (computed by the engine before you apply), with row details. Untick rows to give the
+    text its own **amount range** (e.g. `SHELL` up to $20 → Snacks, from $35 → Gas), or
+    choose **only the ones I tick** to pin one-offs (a car bought by bank cheque).
+  - It spots near misses — an existing text whose range leaves the row out, or one that
+    almost matches (`FISHY JOES` vs `FISHY JOE`) — and offers to edit it instead.
+  - *Categories* shows every category and its texts with how many transactions each catches;
+    click a text to edit it the same way, or rename, move, switch off and set kinds.
+  - *Transfer rules* explains what counts as a transfer, shows what was paired automatically,
+    placed by a rule or is still unknown, and lets you reorder, edit and add rules.
+  - Nothing is saved until **Save**; edits keep the files' comments, and **? Help** explains
+    matching, amount ranges and the pattern syntax.
+- **Transactions** live in a floating window (move, resize, tile to a screen edge, minimize
+  to the dock); clicking a category, merchant, chart bucket, flag or transfer lists its
+  transactions there. Any section can be popped out into its own window (⇱).
+- **Money between accounts & people** is a draggable circle of accounts and people with a
+  ribbon per direction; click a name to drill into where its money came from and went.
 - **AI insights:** export the project zip, ask Claude (this skill) to run the insight
   step on it (`data/` is the `--input`, `config/` the `--config`), then upload the
   resulting `insights.json` back into the project.
@@ -142,7 +172,7 @@ identical to the CLI's (verified by a deep-equal smoke test).
   detected level with its 95% band. A **+N / −N** mark at each level change is green when
   it's good for your money and red when it isn't, and a red ring flags a bucket unusually
   high or low for its level (XmR limits). Life events and unusual-activity tags are
-  overlaid. **Standard / Sensitive** set the detection penalty (PELT, robust noise
+  overlaid; hover an unusual-activity mark on the top edge for what it flags. **Standard / Sensitive** set the detection penalty (PELT, robust noise
   estimate). "New level after N days" (default 14) is the minimum level duration; when
   the engine picks monthly blocks because paydays make weekly data too noisy, the
   effective minimum is ~2 months and the chart says so. Each level lists its unusual-bucket
@@ -152,7 +182,7 @@ identical to the CLI's (verified by a deep-equal smoke test).
 scripts/build-wasm.sh          # Rust -> web/src/wasm (needs wasm32 target + wasm-bindgen-cli 0.2.108)
 cd web && yarn install
 yarn dev                       # or: yarn build  -> dist/index.html (one file, opens via file://)
-yarn test                      # storage/demo/zip unit tests
+yarn test                      # unit tests (storage, zip, rule and account-matching helpers)
 node scripts/verify-e2e.mjs    # headless-Firefox end-to-end check of dist/index.html
 yarn deploy                    # build and copy to ../docs/index.html (GitHub Pages)
 ```
@@ -217,10 +247,21 @@ kind = "spend"                 # spend | income | transfer
   amount_min = "20.00"         # optional; decimal as a string. only matches if |amount| in range
   # amount_max = "..."
   # priority = 10              # higher wins ties; default 0
+  # A text with its OWN amount range (replaces the subcategory's; none = any amount):
+  # ranged = [{ pattern = "SHELL C", amount_max = "20" }]
+
+# One transaction put somewhere by hand, whatever the patterns say (date + signed amount +
+# the bank's description identify it):
+# [[pin]]
+# date = "2999-03-14"
+# amount = "-18450.00"
+# description = "Official Cheque Ref 1"
+# category = "Car"
+# subcategory = "Purchase"
 ```
 
 - **Most-specific match wins**: the longest matching pattern, then highest `priority`, then
-  config order. (So a bare `UBER` loses to `UBER EATS`.)
+  config order. (So a bare `UBER` loses to `UBER EATS`.) A `[[pin]]` beats every pattern.
 - **`kind = "transfer"`** is the double-count fix — those transactions are netted out of both
   inflow and outflow and fed to transfer reconciliation. Use it for credit-card payments and
   movements between your own accounts/people. Give such rules a high `priority`.

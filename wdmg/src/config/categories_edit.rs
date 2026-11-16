@@ -1310,8 +1310,8 @@ kind = "spend"
     #[test]
     fn pins_follow_renames_and_go_with_deletes() {
         let pin = |c: &str, s: &str| CategoryOp::Pin {
-            date: "2026-02-19".into(),
-            amount: "-32893.250".into(),
+            date: "2999-03-14".into(),
+            amount: "-18450.000".into(),
             description: "Official Cheque  Ref 1".into(),
             category: c.into(),
             subcategory: s.into(),
@@ -1322,7 +1322,7 @@ kind = "spend"
         let d = layered(&out);
         assert_eq!(d.pins.len(), 1, "{out}");
         assert_eq!(d.pins[0].subcategory, "Comics");
-        assert_eq!(d.pins[0].amount.to_string(), "-32893.25");
+        assert_eq!(d.pins[0].amount.to_string(), "-18450");
         assert!(
             sub(&d, "Car", "Purchase").is_some(),
             "created by the first pin"
@@ -1353,8 +1353,8 @@ kind = "spend"
         let u = run(
             &m,
             &[CategoryOp::Unpin {
-                date: "2026-02-19".into(),
-                amount: "-32893.25".into(),
+                date: "2999-03-14".into(),
+                amount: "-18450.00".into(),
                 description: "OFFICIAL CHEQUE REF 1".into(),
             }],
         );

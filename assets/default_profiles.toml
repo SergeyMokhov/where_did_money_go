@@ -138,7 +138,7 @@ id_from_filename = '(\d{4})'
 # ---- Ledger with the description split over three columns ---------------------
 # Header: "ID, Date, Account Name, Description1, Description2, Description3,
 # Amount, Balance" — note the space after each comma: it is part of the column
-# names. Dates carry a (meaningless) time, e.g. "2026-03-31 12:00:00 AM"; the
+# names. Dates carry a (meaningless) time, e.g. "2999-03-31 12:00:00 AM"; the
 # engine ignores a trailing time. The three description columns are joined.
 [[profile]]
 id = "split_description_ledger"

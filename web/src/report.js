@@ -928,8 +928,8 @@ export function runReport(DATA, OPTS){
   }
 
   // ---------- money between accounts: who each transfer leg went to / came from ----------
-  // A leg is one transfer row, keyed by account, date and SIGNED cents (a −383.29
-  // to one person and a +383.29 from another on the same day are different legs).
+  // A leg is one transfer row, keyed by account, date and SIGNED cents (a −125.00
+  // to one person and a +125.00 from another on the same day are different legs).
   // Matched pairs and rule-assigned (external) legs know their counterparty; any
   // other leg is "inferred": the e-transfer name read from its description, or
   // "Unmatched" when there is none.

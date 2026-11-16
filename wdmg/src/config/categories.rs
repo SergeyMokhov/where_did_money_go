@@ -32,7 +32,7 @@ pub struct CategoriesDoc {
 pub struct Pin {
     /// Transaction date (`YYYY-MM-DD`).
     pub date: jiff::civil::Date,
-    /// Signed amount as a decimal string (`"-32893.25"`).
+    /// Signed amount as a decimal string (`"-18450.00"`).
     #[serde(with = "rust_decimal::serde::str")]
     pub amount: rust_decimal::Decimal,
     /// The bank's description, as in the statement.
