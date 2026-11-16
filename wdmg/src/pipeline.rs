@@ -201,3 +201,180 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 }
+
+/// How a transfer row's other side was found (see [`rule_lab`]).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LabTransfer {
+    /// `paired` (its twin is in another statement), `rule` (a transfer rule
+    /// named the other side) or `unmatched`.
+    pub how: &'static str,
+    /// The other side's account/person, when known.
+    pub other: Option<String>,
+    /// For `rule`: the rule's index among `[[transfer_rule]]` in file order.
+    pub rule: Option<usize>,
+}
+
+/// One transaction as the rule editors see it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LabRow {
+    /// ISO date.
+    pub date: String,
+    /// Signed amount.
+    pub amount: String,
+    /// Account node (account, else owner, else `unassigned`).
+    pub account: String,
+    /// Normalized merchant / description.
+    pub merchant: String,
+    /// Raw description as exported.
+    pub raw: String,
+    /// The statement file it came from.
+    pub file: String,
+    /// `spend` / `income` / `transfer` / `unknown`, after categorization.
+    pub kind: &'static str,
+    /// Category label, if any.
+    pub category: Option<String>,
+    /// Subcategory label, if any.
+    pub subcategory: Option<String>,
+    /// The category rule that decided it, if any.
+    pub hit: Option<crate::categorize::RuleHit>,
+    /// For transfers: how the other side was found.
+    pub transfer: Option<LabTransfer>,
+}
+
+fn kind_name(k: crate::categorize::EffectiveKind) -> &'static str {
+    use crate::categorize::EffectiveKind as K;
+    match k {
+        K::Spend => "spend",
+        K::Income => "income",
+        K::Transfer => "transfer",
+        K::Unknown => "unknown",
+    }
+}
+
+/// Ingest → dedup → identity → categorize → reconcile, then report for every
+/// row which rule categorized it and how its transfer was resolved. Cheap
+/// enough to re-run on every edit, so a rule editor can preview exactly what a
+/// change does (the analytics stage is skipped).
+///
+/// # Errors
+/// As [`analyze_files`] for the currency guard.
+pub fn rule_lab(config: &Config, files: &[(String, Vec<u8>)]) -> Result<Vec<LabRow>, WdmgError> {
+    use std::collections::HashMap;
+    let (txns, _) = ingest::load_files(config, files);
+    let (mut txns, _) = dedup::dedup(txns);
+    analytics::single_currency(&txns)?;
+    let roster = identity::resolve(config, &mut txns);
+    let categorizer = Categorizer::new(&config.categories);
+    let (assignments, hits): (Vec<_>, Vec<_>) =
+        txns.iter().map(|t| categorizer.assign_explained(t)).unzip();
+    let items: Vec<Categorized<'_>> = txns
+        .iter()
+        .zip(assignments.iter())
+        .map(|(txn, assignment)| Categorized { txn, assignment })
+        .collect();
+    let recon = reconcile::reconcile(&items, config, &roster);
+
+    // Outcomes keyed by (node, date, signed amount); several identical legs
+    // simply take one outcome each.
+    let key = |node: &str, date: &str, amt: rust_decimal::Decimal| {
+        format!("{node}|{date}|{}", amt.normalize())
+    };
+    let mut outcomes: HashMap<String, Vec<LabTransfer>> = HashMap::new();
+    let mut put = |k: String, t: LabTransfer| outcomes.entry(k).or_default().push(t);
+    for p in &recon.matched_pairs {
+        let a = p.amount.amount().abs();
+        put(
+            key(&p.from_account, &p.out_date, -a),
+            LabTransfer {
+                how: "paired",
+                other: Some(p.to_account.clone()),
+                rule: None,
+            },
+        );
+        put(
+            key(&p.to_account, &p.in_date, a),
+            LabTransfer {
+                how: "paired",
+                other: Some(p.from_account.clone()),
+                rule: None,
+            },
+        );
+    }
+    for e in &recon.external {
+        let a = e.amount.amount().abs();
+        let signed = if e.incoming { a } else { -a };
+        put(
+            key(&e.from_account, &e.date, signed),
+            LabTransfer {
+                how: "rule",
+                other: Some(e.to.clone()),
+                rule: None,
+            },
+        );
+    }
+    for u in &recon.unresolved {
+        put(
+            key(&u.account, &u.date, u.amount.amount()),
+            LabTransfer {
+                how: "unmatched",
+                other: None,
+                rule: None,
+            },
+        );
+    }
+    // Which rule (file index) a description falls to — the same first-match
+    // reconcile uses, over the priority-sorted compiled rules.
+    let rule_index = |raw: &str, merchant: &str| -> Option<usize> {
+        let hit = config
+            .transfer_rules
+            .iter()
+            .find(|r| r.pattern.is_match(raw) || r.pattern.is_match(merchant))?;
+        config
+            .people
+            .transfer_rules
+            .iter()
+            .position(|r| *r == hit.rule)
+    };
+
+    Ok(items
+        .iter()
+        .zip(hits)
+        .map(|(c, hit)| {
+            let t = c.txn;
+            let node = t
+                .account_id
+                .clone()
+                .or_else(|| t.owner_person.clone())
+                .unwrap_or_else(|| "unassigned".into());
+            let date = t.date.to_string();
+            let kind = kind_name(c.assignment.kind);
+            let transfer = (kind == "transfer").then(|| {
+                let mut o = outcomes
+                    .get_mut(&key(&node, &date, t.amount.amount()))
+                    .and_then(Vec::pop)
+                    .unwrap_or(LabTransfer {
+                        how: "unmatched",
+                        other: None,
+                        rule: None,
+                    });
+                if o.how == "rule" {
+                    o.rule = rule_index(&t.raw_description, &t.normalized_merchant);
+                }
+                o
+            });
+            LabRow {
+                date,
+                amount: t.amount.amount().to_string(),
+                account: node,
+                merchant: t.normalized_merchant.clone(),
+                raw: t.raw_description.clone(),
+                file: t.source_file.clone(),
+                kind,
+                category: c.assignment.category.clone(),
+                subcategory: c.assignment.subcategory.clone(),
+                hit,
+                transfer,
+            }
+        })
+        .collect())
+}

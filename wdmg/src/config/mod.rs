@@ -10,6 +10,7 @@
 //! never re-check raw config.
 
 pub mod categories;
+pub mod categories_edit;
 pub mod events;
 pub mod people;
 pub mod people_edit;
@@ -23,7 +24,9 @@ use regex::{Regex, RegexBuilder};
 
 use crate::error::ConfigError;
 
-pub use categories::{CategoriesDoc, Category, CategoryKind, Subcategory};
+pub use categories::{
+    pin_key, CategoriesDoc, Category, CategoryKind, Pin, PinKey, RangedPattern, Subcategory,
+};
 pub use events::{EventsDoc, LifeEvent};
 pub use people::{Account, PeopleDoc, Person, TransferRule};
 pub use profiles::{
@@ -352,7 +355,11 @@ impl Config {
         // for any other reason. See `sanitize_category_pattern`.
         for cat in &categories.categories {
             for sub in &cat.subcategories {
-                for pat in &sub.patterns {
+                for pat in sub
+                    .patterns
+                    .iter()
+                    .chain(sub.ranged.iter().map(|r| &r.pattern))
+                {
                     let sanitized = sanitize_category_pattern(pat);
                     let _ = compile_ci(&sanitized, &format!("category {}/{}", cat.name, sub.name))?;
                 }

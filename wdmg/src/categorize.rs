@@ -23,7 +23,7 @@
 //! return assignments in a parallel `Vec` rather than mutating [`Transaction`], so
 //! the original ingest output stays immutable and re-runnable.
 
-use regex::{Regex, RegexBuilder};
+use regex::{Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use rust_decimal::Decimal;
 
 use crate::config::{CategoriesDoc, CategoryKind};
@@ -76,12 +76,29 @@ pub struct Assignment {
     pub needs_review: bool,
 }
 
+/// The rule that categorized a transaction (see [`Categorizer::explain`]).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RuleHit {
+    /// Category name.
+    pub category: String,
+    /// Subcategory name.
+    pub subcategory: String,
+    /// The matching pattern, as written in the config (empty for a pin).
+    pub pattern: String,
+    /// True when a `[[pin]]` for this very transaction put it there.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+}
+
 /// A compiled categorization rule: one subcategory pattern with its context.
 struct CompiledRule {
     category: String,
     subcategory: String,
     kind: EffectiveKind,
-    regex: Regex,
+    /// `None` for a pin (looked up by key, never by text).
+    regex: Option<Regex>,
+    /// The pattern as written in the config (for explanations).
+    pattern: String,
     /// Length of the *pattern string* (not the match) — used for specificity.
     pattern_len: usize,
     amount_min: Option<Decimal>,
@@ -89,11 +106,18 @@ struct CompiledRule {
     priority: i32,
     /// Position in config order; lower wins ties after pattern_len & priority.
     order: usize,
+    pinned: bool,
 }
 
 /// A categorizer: the category rules compiled once, reused across transactions.
 pub struct Categorizer {
     rules: Vec<CompiledRule>,
+    /// All rule patterns as one automaton (same order as `rules`): a single
+    /// pass finds the candidates instead of trying every regex in turn.
+    /// `None` if it couldn't be built (size limits) — then each rule is tried.
+    set: Option<RegexSet>,
+    /// `[[pin]]`s by transaction key; they win over every pattern.
+    pins: std::collections::HashMap<crate::config::PinKey, CompiledRule>,
 }
 
 /// Strip the look-around groups the `regex` crate cannot compile.
@@ -165,41 +189,156 @@ impl Categorizer {
     #[must_use]
     pub fn new(categories: &CategoriesDoc) -> Self {
         let mut rules = Vec::new();
+        let mut sources: Vec<String> = Vec::new();
         let mut order = 0usize;
         for cat in &categories.categories {
             let kind = EffectiveKind::from(cat.kind);
             for sub in &cat.subcategories {
-                for pat in &sub.patterns {
+                // Plain patterns use the subcategory's range; ranged ones their own.
+                let all = sub
+                    .patterns
+                    .iter()
+                    .map(|p| (p, sub.amount_min, sub.amount_max))
+                    .chain(
+                        sub.ranged
+                            .iter()
+                            .map(|r| (&r.pattern, r.amount_min, r.amount_max)),
+                    );
+                for (pat, amount_min, amount_max) in all {
                     let sanitized = sanitize_pattern(pat);
                     if let Ok(regex) = RegexBuilder::new(&sanitized).case_insensitive(true).build()
                     {
+                        sources.push(sanitized);
                         rules.push(CompiledRule {
                             category: cat.name.clone(),
                             subcategory: sub.name.clone(),
                             kind,
-                            regex,
+                            regex: Some(regex),
+                            pattern: pat.clone(),
                             pattern_len: pat.len(),
-                            amount_min: sub.amount_min,
-                            amount_max: sub.amount_max,
+                            amount_min,
+                            amount_max,
                             priority: sub.priority,
                             order,
+                            pinned: false,
                         });
                     }
                     order += 1;
                 }
             }
         }
-        Self { rules }
+        let set = RegexSetBuilder::new(&sources)
+            .case_insensitive(true)
+            .size_limit(64 << 20)
+            .build()
+            .ok();
+        // A pin to a subcategory that no longer exists is ignored.
+        let mut pins = std::collections::HashMap::new();
+        for pin in &categories.pins {
+            let Some(cat) = categories
+                .categories
+                .iter()
+                .find(|c| c.name == pin.category)
+            else {
+                continue;
+            };
+            if !cat.subcategories.iter().any(|s| s.name == pin.subcategory) {
+                continue;
+            }
+            pins.insert(
+                pin.key(),
+                CompiledRule {
+                    category: cat.name.clone(),
+                    subcategory: pin.subcategory.clone(),
+                    kind: EffectiveKind::from(cat.kind),
+                    regex: None,
+                    pattern: String::new(),
+                    pattern_len: 0,
+                    amount_min: None,
+                    amount_max: None,
+                    priority: 0,
+                    order: 0,
+                    pinned: true,
+                },
+            );
+        }
+        Self { rules, set, pins }
+    }
+
+    /// The same categorizer without the [`RegexSet`] prefilter (every rule is
+    /// tried in turn) — the reference the fast path is tested against.
+    #[must_use]
+    pub fn without_prefilter(categories: &CategoriesDoc) -> Self {
+        Self {
+            set: None,
+            ..Self::new(categories)
+        }
+    }
+
+    /// Which rule categorized `txn` (the most specific match), if any — so a
+    /// config editor can say "Coffee, because it contains CAFE".
+    #[must_use]
+    pub fn explain(&self, txn: &Transaction) -> Option<RuleHit> {
+        self.best_rule(txn).map(|r| RuleHit {
+            category: r.category.clone(),
+            subcategory: r.subcategory.clone(),
+            pattern: r.pattern.clone(),
+            pinned: r.pinned,
+        })
+    }
+
+    /// [`Self::assign`] and [`Self::explain`] in one pass over the rules.
+    #[must_use]
+    pub fn assign_explained(&self, txn: &Transaction) -> (Assignment, Option<RuleHit>) {
+        let best = self.best_rule(txn);
+        let hit = best.map(|r| RuleHit {
+            category: r.category.clone(),
+            subcategory: r.subcategory.clone(),
+            pattern: r.pattern.clone(),
+            pinned: r.pinned,
+        });
+        (self.assign_with(txn, best), hit)
     }
 
     /// Categorize one transaction.
     #[must_use]
     pub fn assign(&self, txn: &Transaction) -> Assignment {
-        let abs_amount = txn.amount.amount().abs();
+        let best = self.best_rule(txn);
+        self.assign_with(txn, best)
+    }
 
-        // Find the most-specific matching rule.
+    fn best_rule(&self, txn: &Transaction) -> Option<&CompiledRule> {
+        if !self.pins.is_empty() {
+            let key = crate::config::pin_key(txn.date, txn.amount.amount(), &txn.raw_description);
+            if let Some(pin) = self.pins.get(&key) {
+                return Some(pin);
+            }
+        }
+        match &self.set {
+            Some(set) => {
+                let merchant = set.matches(&txn.normalized_merchant);
+                let raw = set.matches(&txn.raw_description);
+                // A rule in both sets is simply considered twice; `pick` is idempotent.
+                let candidates = merchant
+                    .iter()
+                    .chain(raw.iter())
+                    .filter_map(|i| self.rules.get(i));
+                Self::pick(candidates, txn, false)
+            }
+            None => Self::pick(self.rules.iter(), txn, true),
+        }
+    }
+
+    /// The most specific rule among `candidates` whose amount bounds hold
+    /// (and, when `check_text`, whose regex matches — the set already did).
+    fn pick<'r>(
+        candidates: impl Iterator<Item = &'r CompiledRule>,
+        txn: &Transaction,
+        check_text: bool,
+    ) -> Option<&'r CompiledRule> {
+        let abs_amount = txn.amount.amount().abs();
         let mut best: Option<&CompiledRule> = None;
-        for rule in &self.rules {
+        for rule in candidates {
             // Amount bounds gate (inclusive).
             if let Some(min) = rule.amount_min {
                 if abs_amount < min {
@@ -212,8 +351,10 @@ impl Categorizer {
                 }
             }
             // Match normalized merchant first, then raw description.
-            if !rule.regex.is_match(&txn.normalized_merchant)
-                && !rule.regex.is_match(&txn.raw_description)
+            if check_text
+                && !rule.regex.as_ref().is_some_and(|re| {
+                    re.is_match(&txn.normalized_merchant) || re.is_match(&txn.raw_description)
+                })
             {
                 continue;
             }
@@ -236,6 +377,11 @@ impl Categorizer {
             });
         }
 
+        best
+    }
+
+    #[allow(clippy::unused_self)]
+    fn assign_with(&self, txn: &Transaction, best: Option<&CompiledRule>) -> Assignment {
         match best {
             Some(rule) => {
                 // Reconcile the rule's kind with the ingest-declared kind.
@@ -342,6 +488,73 @@ mod tests {
             account_id: None,
             harvested_category: None,
             dedup_key: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_pin_wins_over_patterns_for_that_transaction_only() {
+        let mut cats = cfg().categories;
+        cats.pins.push(crate::config::Pin {
+            date: date(2026, 1, 2),
+            amount: rust_decimal::Decimal::from_str("-25.0").unwrap(),
+            description: "  uber   eats ".into(),
+            category: "Car".into(),
+            subcategory: cats
+                .categories
+                .iter()
+                .find(|c| c.name == "Car")
+                .unwrap()
+                .subcategories[0]
+                .name
+                .clone(),
+        });
+        let c = Categorizer::new(&cats);
+        let (a, hit) = c.assign_explained(&txn("UBER EATS", "-25.00", TxnType::Spend));
+        assert_eq!(a.category.as_deref(), Some("Car"));
+        assert!(hit.unwrap().pinned);
+        // Another amount: the patterns decide as usual.
+        let b = c.assign(&txn("UBER EATS", "-26.00", TxnType::Spend));
+        assert_eq!(b.subcategory.as_deref(), Some("Restaurants"));
+        // Same through the reference path.
+        let r = Categorizer::without_prefilter(&cats);
+        assert_eq!(
+            r.assign(&txn("UBER EATS", "-25.00", TxnType::Spend))
+                .category
+                .as_deref(),
+            Some("Car")
+        );
+    }
+
+    #[test]
+    fn a_ranged_pattern_uses_its_own_range() {
+        let mut cats = cfg().categories;
+        let coffee = cats
+            .categories
+            .iter_mut()
+            .flat_map(|c| c.subcategories.iter_mut())
+            .find(|s| s.name == "Coffee")
+            .unwrap();
+        assert!(coffee.amount_max.is_some(), "the built-in Coffee is capped");
+        coffee.ranged.push(crate::config::RangedPattern {
+            pattern: "STARBUCKS".into(),
+            amount_min: None,
+            amount_max: None,
+        });
+        coffee.ranged.push(crate::config::RangedPattern {
+            pattern: "SHELL C1".into(),
+            amount_min: None,
+            amount_max: Some(rust_decimal::Decimal::from(20)),
+        });
+        for c in [
+            Categorizer::new(&cats),
+            Categorizer::without_prefilter(&cats),
+        ] {
+            let big = c.assign(&txn("STARBUCKS COFFEE", "-46.24", TxnType::Spend));
+            assert_eq!(big.subcategory.as_deref(), Some("Coffee"));
+            let snack = c.assign(&txn("SHELL C123", "-12.00", TxnType::Spend));
+            assert_eq!(snack.subcategory.as_deref(), Some("Coffee"));
+            let pump = c.assign(&txn("SHELL C123", "-60.00", TxnType::Spend));
+            assert_ne!(pump.subcategory.as_deref(), Some("Coffee"));
         }
     }
 

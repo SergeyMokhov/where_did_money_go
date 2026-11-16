@@ -16,6 +16,57 @@ pub struct CategoriesDoc {
     /// Top-level categories.
     #[serde(default, rename = "category")]
     pub categories: Vec<Category>,
+    /// One-off assignments: a single transaction (by date, amount and bank
+    /// wording) put into a subcategory regardless of the patterns.
+    #[serde(default, rename = "pin", skip_serializing_if = "Vec::is_empty")]
+    pub pins: Vec<Pin>,
+}
+
+/// A single transaction pinned to a subcategory (`[[pin]]`), for one-offs a
+/// text rule can't single out — a car bought by bank cheque, a gift.
+///
+/// It applies to every transaction with this date, this signed amount and this
+/// bank wording (compared ignoring case and repeated spaces), so two identical
+/// rows on the same day are pinned together. A pin wins over every pattern.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pin {
+    /// Transaction date (`YYYY-MM-DD`).
+    pub date: jiff::civil::Date,
+    /// Signed amount as a decimal string (`"-32893.25"`).
+    #[serde(with = "rust_decimal::serde::str")]
+    pub amount: rust_decimal::Decimal,
+    /// The bank's description, as in the statement.
+    pub description: String,
+    /// Target category.
+    pub category: String,
+    /// Target subcategory.
+    pub subcategory: String,
+}
+
+impl Pin {
+    /// The key a transaction is looked up by.
+    #[must_use]
+    pub fn key(&self) -> PinKey {
+        pin_key(self.date, self.amount, &self.description)
+    }
+}
+
+/// `(date, normalized amount, folded description)` — see [`Pin`].
+pub type PinKey = (jiff::civil::Date, rust_decimal::Decimal, String);
+
+/// Build a [`PinKey`] from a transaction's fields.
+#[must_use]
+pub fn pin_key(
+    date: jiff::civil::Date,
+    amount: rust_decimal::Decimal,
+    description: &str,
+) -> PinKey {
+    let folded = description
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_uppercase();
+    (date, amount.normalize(), folded)
 }
 
 fn default_schema_version() -> u32 {
@@ -63,6 +114,41 @@ pub struct Subcategory {
     /// Tie-break priority (higher wins); defaults to 0.
     #[serde(default)]
     pub priority: i32,
+    /// Patterns with their own amount range, which replaces the subcategory's
+    /// `amount_min`/`amount_max` for that pattern (`SHELL` up to 20 → snacks,
+    /// while the same subcategory's other patterns take any amount).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ranged: Vec<RangedPattern>,
+}
+
+/// A pattern with its own amount range (`ranged = [{ pattern = "SHELL", amount_max = "20" }]`).
+/// No bounds = any amount, ignoring the subcategory's range.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RangedPattern {
+    /// Unanchored, case-insensitive regex, like `patterns`.
+    pub pattern: String,
+    /// Inclusive lower bound on the absolute amount.
+    #[serde(
+        default,
+        with = "opt_decimal_str",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub amount_min: Option<rust_decimal::Decimal>,
+    /// Inclusive upper bound on the absolute amount.
+    #[serde(
+        default,
+        with = "opt_decimal_str",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub amount_max: Option<rust_decimal::Decimal>,
+}
+
+impl Subcategory {
+    /// True when it has no patterns at all (an emptied built-in is "off").
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.patterns.is_empty() && self.ranged.is_empty()
+    }
 }
 
 /// Serialize `Option<Decimal>` as an optional string so amount bounds round-trip
@@ -127,6 +213,9 @@ impl CategoriesDoc {
     /// append new categories/subcategories.
     fn overlay(mut self, other: CategoriesDoc) -> CategoriesDoc {
         self.schema_version = other.schema_version.max(self.schema_version);
+        // Pins accumulate; a later one for the same transaction wins (the
+        // categorizer keeps the last).
+        self.pins.extend(other.pins);
         for other_cat in other.categories {
             match self
                 .categories

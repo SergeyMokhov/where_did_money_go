@@ -279,6 +279,171 @@ pub fn people_json(text: &str) -> Result<String, String> {
     serde_json::to_string(&doc).map_err(|e| format!("failed to serialize people: {e}"))
 }
 
+/// The categories the user's file is layered over: built-in + `learned.toml`.
+fn category_base(texts: &BTreeMap<String, String>) -> Result<wdmg::config::CategoriesDoc, String> {
+    let defaults: wdmg::config::CategoriesDoc =
+        toml::from_str(wdmg::config::defaults::categories())
+            .map_err(|e| format!("built-in categories: {e}"))?;
+    let learned = match texts.get("learned.toml") {
+        Some(t) => Some(toml::from_str(t).map_err(|e| format!("learned.toml: {e}"))?),
+        None => None,
+    };
+    Ok(defaults.merge(learned, None))
+}
+
+fn config_texts(config_json: &str) -> Result<BTreeMap<String, String>, String> {
+    if config_json.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    serde_json::from_str(config_json).map_err(|e| format!("config must be a JSON object: {e}"))
+}
+
+#[derive(Serialize)]
+struct LabSub {
+    name: String,
+    patterns: Vec<String>,
+    /// Patterns with their own amount range.
+    ranged: Vec<LabRanged>,
+    amount_min: Option<String>,
+    amount_max: Option<String>,
+    priority: i32,
+    /// `builtin` (as shipped), `changed` (a built-in your file overrides),
+    /// `yours` (only in your file) or `off` (a built-in your file emptied).
+    source: &'static str,
+}
+#[derive(Serialize)]
+struct LabRanged {
+    pattern: String,
+    amount_min: Option<String>,
+    amount_max: Option<String>,
+}
+#[derive(Serialize)]
+struct LabCategory {
+    name: String,
+    kind: wdmg::config::CategoryKind,
+    subs: Vec<LabSub>,
+}
+#[derive(Serialize)]
+struct LabRule {
+    pattern: String,
+    to: String,
+    priority: i32,
+}
+#[derive(Serialize)]
+struct LabOut {
+    rows: Vec<wdmg::pipeline::LabRow>,
+    categories: Vec<LabCategory>,
+    /// Transfer rules in file order (indices match `rows[].transfer.rule`).
+    rules: Vec<LabRule>,
+    /// Valid transfer-rule targets: people, then accounts.
+    targets: Vec<String>,
+}
+
+/// Rows with the rule that categorized each and how its transfer resolved,
+/// plus the layered categories (with where each subcategory comes from) and
+/// the transfer rules — everything the rule editors show and preview.
+pub fn rule_lab_json(files: &[(String, Vec<u8>)], config_json: &str) -> Result<String, String> {
+    let texts = config_texts(config_json)?;
+    let config = parse_config(config_json)?;
+    let rows = wdmg::pipeline::rule_lab(&config, files)
+        .map_err(|e| format!("analysis failed: {}", error_chain(&e)))?;
+    let base = category_base(&texts)?;
+    let user: Option<wdmg::config::CategoriesDoc> = match texts.get("categories.toml") {
+        Some(t) => Some(toml::from_str(t).map_err(|e| format!("categories.toml: {e}"))?),
+        None => None,
+    };
+    let find = |doc: &wdmg::config::CategoriesDoc, c: &str, s: &str| {
+        doc.categories
+            .iter()
+            .find(|x| x.name == c)
+            .and_then(|x| x.subcategories.iter().find(|y| y.name == s))
+            .cloned()
+    };
+    let categories = config
+        .categories
+        .categories
+        .iter()
+        .map(|c| LabCategory {
+            name: c.name.clone(),
+            kind: c.kind,
+            subs: c
+                .subcategories
+                .iter()
+                .map(|s| {
+                    let in_base = find(&base, &c.name, &s.name);
+                    let in_user = user.as_ref().and_then(|u| find(u, &c.name, &s.name));
+                    let source = match (in_base, in_user) {
+                        (Some(b), Some(u)) if u.is_empty() && !b.is_empty() => {
+                            "off"
+                        }
+                        (Some(b), Some(u)) if b != u => "changed",
+                        (Some(_), _) => "builtin",
+                        _ => "yours",
+                    };
+                    LabSub {
+                        name: s.name.clone(),
+                        patterns: s.patterns.clone(),
+                        ranged: s
+                            .ranged
+                            .iter()
+                            .map(|r| LabRanged {
+                                pattern: r.pattern.clone(),
+                                amount_min: r.amount_min.map(|d| d.to_string()),
+                                amount_max: r.amount_max.map(|d| d.to_string()),
+                            })
+                            .collect(),
+                        amount_min: s.amount_min.map(|d| d.to_string()),
+                        amount_max: s.amount_max.map(|d| d.to_string()),
+                        priority: s.priority,
+                        source,
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    let rules = config
+        .people
+        .transfer_rules
+        .iter()
+        .map(|r| LabRule {
+            pattern: r.pattern.clone(),
+            to: r.to.clone(),
+            priority: r.priority,
+        })
+        .collect();
+    let targets = config
+        .people
+        .persons
+        .iter()
+        .map(|p| p.id.clone())
+        .chain(
+            config
+                .people
+                .persons
+                .iter()
+                .flat_map(|p| p.accounts.iter().map(|a| a.id.clone())),
+        )
+        .collect();
+    serde_json::to_string(&LabOut {
+        rows,
+        categories,
+        rules,
+        targets,
+    })
+    .map_err(|e| format!("failed to serialize: {e}"))
+}
+
+/// Edit the user's `categories.toml` (empty = none yet), layered over the
+/// built-in + learned categories from `config_json`.
+pub fn edit_categories_json(
+    user_text: &str,
+    config_json: &str,
+    ops_json: &str,
+) -> Result<String, String> {
+    let base = category_base(&config_texts(config_json)?)?;
+    wdmg::config::categories_edit::apply_json(user_text, &base, ops_json).map_err(|e| e.to_string())
+}
+
 /// Validate a change-point request JSON and run the engine.
 pub fn changepoints_json(input_json: &str) -> Result<String, String> {
     let req: changepoint::Request =
@@ -347,6 +512,24 @@ pub fn edit_people(text: &str, ops_json: &str) -> Result<String, JsError> {
     edit_people_json(text, ops_json).map_err(|e| JsError::new(&e))
 }
 
+/// Rows + rules for the rule editors (see [`rule_lab_json`]).
+#[wasm_bindgen]
+pub fn rule_lab(files: js_sys::Array, config_json: &str) -> Result<String, JsError> {
+    let files = files_from_js(&files).map_err(|e| JsError::new(&e))?;
+    rule_lab_json(&files, config_json).map_err(|e| JsError::new(&e))
+}
+
+/// Edit the user's `categories.toml`; `ops_json` is a JSON array of
+/// `config::categories_edit::CategoryOp`. Returns the new text.
+#[wasm_bindgen]
+pub fn edit_categories(
+    user_text: &str,
+    config_json: &str,
+    ops_json: &str,
+) -> Result<String, JsError> {
+    edit_categories_json(user_text, config_json, ops_json).map_err(|e| JsError::new(&e))
+}
+
 /// Parse `people.toml` text into JSON for the UI.
 #[wasm_bindgen]
 pub fn parse_people(text: &str) -> Result<String, JsError> {
@@ -394,6 +577,86 @@ mod tests {
         assert_eq!(lr["errors"][0]["file"], "bad.csv");
         assert!(out["analysis"]["transactions"].is_array());
         assert!(out["review_queue"]["unknown_merchants"].is_array());
+    }
+
+    #[test]
+    fn rule_lab_and_category_edits_round_trip() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../playground");
+        let mut cfg = BTreeMap::new();
+        for n in ["profiles.toml", "categories.toml", "people.toml"] {
+            cfg.insert(
+                n.to_string(),
+                std::fs::read_to_string(root.join("config").join(n)).unwrap(),
+            );
+        }
+        let files: Vec<(String, Vec<u8>)> = ["joint_chequing.csv", "fry_mastercard_7011.csv"]
+            .iter()
+            .map(|f| {
+                (
+                    f.to_string(),
+                    std::fs::read(root.join("data").join(f)).unwrap(),
+                )
+            })
+            .collect();
+        let cj = serde_json::to_string(&cfg).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&rule_lab_json(&files, &cj).unwrap()).unwrap();
+        assert!(v["rows"].as_array().unwrap().len() > 100);
+        assert!(!v["rules"].as_array().unwrap().is_empty());
+        let cats = v["categories"].as_array().unwrap();
+        let src = |c: &str, s: &str| {
+            cats.iter()
+                .find(|x| x["name"] == c)
+                .and_then(|x| {
+                    x["subs"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|y| y["name"] == s)
+                })
+                .map(|y| y["source"].clone())
+        };
+        // The playground overrides the built-in "Coffee" (adds patterns): changed.
+        assert_eq!(
+            src("Takeout & Restaurants", "Coffee"),
+            Some(serde_json::json!("changed"))
+        );
+        // Adding a pattern from the browser: the next lab run categorizes with it.
+        let user = cfg["categories.toml"].clone();
+        let row = v["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == "spend" && r["merchant"].as_str().is_some_and(|m| m.len() > 12))
+            .cloned();
+        assert!(row.is_some(), "the playground has a spend row");
+        if let Some(row) = row {
+            let m = row["merchant"].as_str().unwrap().to_string();
+            let ops = serde_json::json!([{"op":"add_pattern","category":"Test","subcategory":"Probe","pattern": regex_escape(&m)}]).to_string();
+            let edited = edit_categories_json(&user, &cj, &ops).unwrap();
+            cfg.insert("categories.toml".into(), edited);
+            let v2: serde_json::Value = serde_json::from_str(
+                &rule_lab_json(&files, &serde_json::to_string(&cfg).unwrap()).unwrap(),
+            )
+            .unwrap();
+            assert!(v2["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["merchant"] == m.as_str() && r["category"] == "Test"));
+        }
+    }
+
+    fn regex_escape(s: &str) -> String {
+        s.chars()
+            .flat_map(|c| {
+                if "\\.+*?()|[]{}^$#&-~".contains(c) {
+                    vec!['\\', c]
+                } else {
+                    vec![c]
+                }
+            })
+            .collect()
     }
 
     #[test]

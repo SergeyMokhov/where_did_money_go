@@ -71,6 +71,7 @@ proptest! {
         let mut doc = CategoriesDoc {
             schema_version: 1,
             categories: Vec::new(),
+            pins: Vec::new(),
         };
         for (i, name) in names.into_iter().enumerate() {
             doc.categories.push(wdmg::config::Category {
@@ -82,6 +83,7 @@ proptest! {
                     amount_min: Some(Decimal::new(min_units, 2)),
                     amount_max: None,
                     priority: i as i32,
+                    ranged: Vec::new(),
                 }],
             });
         }

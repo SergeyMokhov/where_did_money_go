@@ -5,6 +5,7 @@ import { DEMO_ID, resetDemo } from './demo';
 import { checkProject, defaultConfig, type FileCheck } from './engine';
 import { openMapper } from './mapper';
 import { openPeopleEditor } from './people';
+import { openRulesEditor } from './rules';
 import { MAX_FILE_BYTES, exportBundle, exportZip, importZip, readZipEntries, type BundleKind } from './zip';
 import {
   CONFIG_NAMES, INSIGHTS_NAME, deleteProject, getActiveId, listProjects, newId,
@@ -280,6 +281,9 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
       : [h('tr', {}, h('td', { class: 'empty', colspan: '4' }, 'No statement files yet.'))])));
   const badCount = checks.filter((c) => c.error).length;
   const orphanFiles = checks.filter((c) => (c.accounts?.unassigned || 0) > 0).length;
+  const rulesBtn = btn('🏷 Categories & rules…', async () => {
+    if (await openRulesEditor(doc)) { await save(); toast('Saved categories & rules.'); }
+  }, 'btn small');
   const peopleBtn = (label: string, cls = 'btn small') => btn(label, async () => {
     if (await openPeopleEditor(doc)) { await save(); toast('Saved people & accounts to people.toml.'); }
   }, cls, 'Rename people and accounts, change owners, give statement files an account');
@@ -324,7 +328,7 @@ function projectDetail(doc: ProjectDoc, activeId: string): HTMLElement {
       `${orphanFiles} statement file${orphanFiles === 1 ? ' has' : 's have'} rows that belong to no account. `,
       peopleBtn('Assign accounts…', 'btn small active'))] : []),
     dataTbl,
-    h('h3', { class: 'cfg-h3' }, 'Configuration', h('span', { class: 'cfg-h3-btns' }, peopleBtn('👥 People & accounts…'), bundleBtns('config'))), cfgTbl,
+    h('h3', { class: 'cfg-h3' }, 'Configuration', h('span', { class: 'cfg-h3-btns' }, peopleBtn('👥 People & accounts…'), rulesBtn, bundleBtns('config'))), cfgTbl,
     h('h3', { class: 'cfg-h3' }, 'AI insights'), insTbl,
   );
 }

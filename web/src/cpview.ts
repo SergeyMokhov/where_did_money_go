@@ -5,6 +5,19 @@
 // bucket that is unusually high/low for its level, and the shared life-event /
 // unusual-activity overlay. All statistics come from the WebAssembly engine.
 import uPlot from 'uplot';
+
+/** "2026-08-30" → "Aug 30, 2026". */
+const fmtDay = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m[2] - 1]} ${+m[3]}, ${m[1]}` : iso;
+};
+const TIME_TICKS = [
+  // tick spacing (s), label, label where the year changes — "Aug 30" instead of uPlot's "8/30".
+  [86400 * 365, '{YYYY}', null, null, null, null, null, null, 1],
+  [86400 * 28, '{MMM}', '\n{YYYY}', null, null, null, null, null, 1],
+  [86400, '{MMM} {D}', '\n{YYYY}', null, null, null, null, null, 1],
+  [3600, '{MMM} {D}', '\n{YYYY}', null, null, null, null, null, 1],
+];
 import { changepoints, type CpResult, type Gran, type Metric, type Sensitivity } from './engine';
 
 const DAY_MS = 86_400_000;
@@ -230,7 +243,7 @@ export function drawChangePoints(host: HTMLElement, ctx: CpCtx) {
       cursor: { sync: { key: 'wdmg-cp' }, drag: { x: true, y: false, setScale: false }, points: { size: 7 } },
       scales: { x: { time: true }, y: { range: () => [ymin - pad, ymax + pad] } },
       axes: [
-        { stroke: pal.axis, grid: { stroke: ctx.dark ? '#262d39' : '#e6e8ec' } },
+        { stroke: pal.axis, grid: { stroke: ctx.dark ? '#262d39' : '#e6e8ec' }, values: TIME_TICKS as uPlot.Axis.Values, space: 60 },
         { stroke: pal.axis, size: 58, grid: { stroke: ctx.dark ? '#262d39' : '#e6e8ec' },
           values: (_u, vals) => vals.map(ctx.fmtAxisNum) },
       ],
@@ -471,10 +484,14 @@ function makeTooltip(box: HTMLElement, r: CpResult, ctx: CpCtx, unit: number) {
   const hook = (uu: uPlot) => {
     const i = uu.cursor.idx;
     if (i == null || !r.buckets[i]) { tip.hidden = true; return; }
+    // On an unusual-activity tag (top rail) its own tooltip explains it instead.
+    const cx = uu.cursor.left ?? -1, cy = uu.cursor.top ?? 99;
+    const hits = (uu as unknown as { _anomHits?: { x1: number; x2: number }[] })._anomHits ?? [];
+    if (cy <= 12 && hits.some((hh) => cx >= hh.x1 && cx <= hh.x2)) { tip.hidden = true; return; }
     const b = r.buckets[i];
     const seg = r.segments[b.segment];
     const lines = [
-      `<b>${b.start}</b>${b.partial ? ' <span class="muted">(partial)</span>' : ''}`,
+      `<b>${fmtDay(b.start)}</b>${b.partial ? ' <span class="muted">(partial)</span>' : ''}`,
       `Bucket: <b>${compactMoney(ctx, b.value)}</b>`,
       seg ? `Level: ${compactMoney(ctx, seg.level_per_day * unit)}${UNIT_LABEL[ctx.gran]}` : '',
       b.lo != null && b.hi != null ? `Normal range: ${compactMoney(ctx, b.lo)} – ${compactMoney(ctx, b.hi)}` : '',

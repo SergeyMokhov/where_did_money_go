@@ -475,7 +475,7 @@ export function runReport(DATA, OPTS){
   function anomalyChartTags(){
     return detectAnomalies().map(function(a){
       var ext = anomalyExtent(a); if(!ext) return null;
-      return { start:ext.start, end:ext.end, point:ext.point,
+      return { start:ext.start, end:ext.end, point:ext.point, a:a,
         color: ANOM_TAG_COLOR[sevClass(a)] || "#9aa0a6" };
     }).filter(Boolean);
   }
@@ -759,14 +759,22 @@ export function runReport(DATA, OPTS){
         return '<th data-sort="'+c[0]+'"'+(c[0] === "amount" ? ' class="num"' : '')+' title="Sort">'+c[1]+
           (on ? (TXSORT.dir < 0 ? ' ▾' : ' ▴') : '')+'</th>';
       }).join("")+'</tr></thead><tbody>'+
-      shown.map(function(t){
+      shown.map(function(t, i){
         var c = toCents(t.amount); var cls = c < 0 ? "neg" : "pos";
         return '<tr><td class="muted">'+esc(t.date)+'</td><td class="mer">'+esc(t.merchant)+
-          '</td><td>'+esc(t.category)+' <span class="muted">/ '+esc(t.subcategory)+'</span></td>'+
+          '</td><td>'+esc(t.category)+' <span class="muted">/ '+esc(t.subcategory)+'</span>'+
+          (OPTS.onCategorise ? ' <button type="button" class="tw-cat" data-tx="'+i+'" title="Change how this is sorted (makes a rule; shows what else it moves)" aria-label="Sort '+esc(t.merchant)+'">✎</button>' : '')+'</td>'+
           '<td><span class="tag">'+esc(t.kind)+'</span></td><td>'+esc(t.person)+'</td><td>'+esc(t.account)+
           '</td><td class="num '+cls+'">'+fmtMoney(c)+'</td></tr>';
       }).join("")+
       '</tbody></table>';
+    body.querySelectorAll(".tw-cat").forEach(function(b){
+      b.addEventListener("click", function(ev){
+        ev.stopPropagation();
+        var t = shown[+b.getAttribute("data-tx")];
+        OPTS.onCategorise({ merchant: t.merchant, date: t.date, amount: t.amount, account: t.account });
+      });
+    });
     body.querySelectorAll("th[data-sort]").forEach(function(th){
       th.addEventListener("click", function(){
         var c = th.getAttribute("data-sort");
@@ -1639,6 +1647,8 @@ export function runReport(DATA, OPTS){
     // translucent band fill (e.fill), assigned in allEvents().
     var evs = visibleEvents();
     var anomTags = state.showAnomTags ? anomalyChartTags() : [];
+    u._anomHits = [];
+    wireAnomHover(u);
     if(!evs.length && !anomTags.length) return;
     var ctx = u.ctx, dpr = u.pxRatio || window.devicePixelRatio || 1;
     var top = u.bbox.top, bot = u.bbox.top + u.bbox.height;
@@ -1717,14 +1727,51 @@ export function runReport(DATA, OPTS){
         ctx.beginPath();
         ctx.moveTo(x, railY - r); ctx.lineTo(x + r, railY); ctx.lineTo(x, railY + r); ctx.lineTo(x - r, railY);
         ctx.closePath(); ctx.fill();
+        u._anomHits.push({ x1:(x - left) / dpr - 5, x2:(x - left) / dpr + 5, a:g.a, color:g.color });
       } else {
         var x1 = clampX(u.valToPos(Math.max(sTs, xmin), "x", true));
         var x2 = clampX(u.valToPos(Math.min(eTs, xmax), "x", true));
         if(x2 < x1){ var t = x1; x1 = x2; x2 = t; }
         ctx.fillRect(x1, railY - 2 * dpr, Math.max(2 * dpr, x2 - x1), 4 * dpr);
+        u._anomHits.push({ x1:(x1 - left) / dpr - 2, x2:(x2 - left) / dpr + 2, a:g.a, color:g.color });
       }
     });
     ctx.restore();
+  }
+  // Hovering a tag on the top rail explains it (the marks are canvas pixels, so
+  // hit-boxes recorded while drawing are tested against the pointer).
+  var SEV_WORD = { "sev-high":"High", "sev-medium":"Medium", "sev-low":"Low" };
+  function anomTipEl(){
+    var t = document.getElementById("anom-tip");
+    if(!t){ t = document.createElement("div"); t.id = "anom-tip"; t.className = "anom-tip"; t.hidden = true; document.body.appendChild(t); }
+    return t;
+  }
+  function wireAnomHover(u){
+    if(u._anomWired || !u.over) return;
+    u._anomWired = true;
+    var over = u.over;
+    over.addEventListener("mousemove", function(e){
+      var tip = anomTipEl(), r = over.getBoundingClientRect();
+      var x = e.clientX - r.left, y = e.clientY - r.top;
+      var hits = y <= 12 ? (u._anomHits || []).filter(function(h){ return x >= h.x1 && x <= h.x2; }) : [];
+      over.classList.toggle("anom-hover", hits.length > 0);
+      if(!hits.length){ tip.hidden = true; return; }
+      tip.innerHTML = hits.slice(0, 4).map(function(h){
+        var a = h.a, sev = sevClass(a);
+        var amt = a.method === "benford" || a.amount == null ? "" : ' · ' + fmtMoney(toCents(a.amount));
+        return '<div class="anom-tip-item"><div><span class="anom-tip-dot" style="background:'+h.color+'"></span><b>'+
+          esc(SEV_WORD[sev] || "")+'</b> · '+esc(METHOD_LABEL[a.method] || a.method)+'</div>'+
+          '<div>'+esc(a.reason || a.category || "")+'</div>'+
+          '<div class="muted">'+esc(a.period_or_date || "")+(a.merchant ? ' · '+esc(a.merchant) : a.category ? ' · '+esc(a.category) : '')+amt+'</div></div>';
+      }).join("") + (hits.length > 4 ? '<div class="muted">… and '+(hits.length - 4)+' more here</div>' : '') +
+        '<div class="muted anom-tip-foot">Unusual activity flag — full list in the Unusual activity section.</div>';
+      tip.hidden = false;
+      var tw = tip.offsetWidth, th = tip.offsetHeight;
+      var left = Math.min(e.clientX + 12, window.innerWidth - tw - 8), top = e.clientY + 16;
+      if(top + th > window.innerHeight - 8) top = e.clientY - th - 12;
+      tip.style.left = Math.max(8, left) + "px"; tip.style.top = Math.max(8, top) + "px";
+    });
+    over.addEventListener("mouseleave", function(){ anomTipEl().hidden = true; over.classList.remove("anom-hover"); });
   }
   // A section popped out into a window gets the window's shape: its main visual
   // fills the leftover height (CSS makes it a flex item) instead of a fixed size.
@@ -1791,12 +1838,19 @@ export function runReport(DATA, OPTS){
     if(empty) empty.style.display = "none";
     var dark = document.documentElement.getAttribute("data-theme") === "dark";
     var stroke = dark ? "#9aa3b2" : "#6b7280";
+    var TIME_TICKS = [
+      // tick spacing (s), label, label where the year changes — "Aug 30" instead of uPlot's "8/30".
+      [86400 * 365, '{YYYY}', null, null, null, null, null, null, 1],
+      [86400 * 28, '{MMM}', '\n{YYYY}', null, null, null, null, null, 1],
+      [86400, '{MMM} {D}', '\n{YYYY}', null, null, null, null, null, 1],
+      [3600, '{MMM} {D}', '\n{YYYY}', null, null, null, null, null, 1],
+    ];
     uplotInst = new uPlot({
       width: chartEl.clientWidth || 640, height: rawChartHeight(),
       legend: { live: true },
       // Compact y labels (50k, -20k, 1.2M) so big amounts don't overflow the gutter;
       // size reserves enough room for the widest label.
-      axes: [ { stroke: stroke },
+      axes: [ { stroke: stroke, values: TIME_TICKS, space: 60 },
               { stroke: stroke, size: 58,
                 values: function(u, vals){ return vals.map(fmtAxisNum); } } ],
       scales: { x: { time: true } },
@@ -2070,7 +2124,9 @@ export function runReport(DATA, OPTS){
     tagWrap.appendChild(tagCb);
     tagWrap.appendChild(document.createTextNode(" Tag unusual activity on the chart"));
     tagWrap.appendChild((function(){ var s = document.createElement("span"); s.className = "anomtag-key";
-      s.innerHTML = ' <span class="ak ak-h"></span><span class="ak ak-m"></span><span class="ak ak-l"></span> by severity'; return s; })());
+      s.innerHTML = ' <span class="ak ak-h"></span><span class="ak ak-m"></span><span class="ak ak-l"></span> by severity';
+      s.title = "Marks along the top of the chart for flags in Unusual activity: red = high, orange = medium, grey = low severity. A diamond is one day, a bar a month or a streak. Hover one for what it is.";
+      return s; })());
     tagCb.addEventListener("change", function(){
       state.showAnomTags = tagCb.checked;
       try { window.localStorage.setItem(ANOMTAGS_KEY, tagCb.checked ? "1" : "0"); } catch(e){}

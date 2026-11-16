@@ -522,6 +522,154 @@ await page.waitForFunction(() => !document.getElementById('report-root').hidden,
 const renamed = await page.$$eval('#by-account-panel tbody td:first-child', (t) => t.map((x) => x.textContent));
 step(renamed.includes('Bender Main') && !renamed.includes('Bender Ledger'), 'rename from the explore view re-analyzes the report', JSON.stringify(renamed));
 
+// Categories & rules: sort a transaction from the Transactions window (rule
+// made from the example, previewed by the engine, saved, report re-analyzed).
+if (await page.$eval('#txwin', (w) => w.hidden)) { await page.$eval('#txwin-dock', (b) => b.click()); await sleep(600); }
+// A merchant its current text only partly covers (BLACKJACK → BLACKJACK PALACE), so the full name wins.
+await page.$eval('.tw-chip .tw-x', (b) => b.click()).catch(() => {});
+const exMer = await page.$$eval('#txwin tbody tr', (rs) => {
+  const r = rs.find((x) => x.querySelector('.mer').textContent === 'BLACKJACK PALACE');
+  r.querySelector('.tw-cat').click(); return 'BLACKJACK PALACE';
+});
+await page.waitForSelector('.ru-maker');
+await page.$eval('.ru-maker-text', (i, m) => { i.value = m; i.dispatchEvent(new Event('input')); }, exMer);
+await page.$eval('.ru-target', (s) => { s.value = '+new'; s.dispatchEvent(new Event('change')); });
+await page.$$eval('.ru-newbits input', (ins) => {
+  ins[0].value = 'E2E Things'; ins[0].dispatchEvent(new Event('input'));
+  ins[1].value = 'Probe'; ins[1].dispatchEvent(new Event('input'));
+});
+await page.waitForFunction(() => /would be sorted differently/.test(document.querySelector('.ru-maker .mg-verdict').textContent) &&
+  /→ E2E Things › Probe/.test(document.querySelector('.ru-preview').textContent), { timeout: 15000 });
+const mk = await page.evaluate(() => ({ verdict: document.querySelector('.ru-maker .mg-verdict').textContent, first: document.querySelector('.ru-preview div')?.textContent, list: document.querySelectorAll('.ru-list tbody tr.ru-li').length }));
+step(mk.list >= 18, 'sort from a transaction: rule previewed with the engine, transactions listed', JSON.stringify(mk));
+await shot('rules-maker');
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), clickText('.ru-maker .map-actions button', 'Apply & save')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+const sorted = await page.evaluate(() => (window.__wdmg_tx || null) ?? document.body.textContent.includes('E2E Things'));
+step(sorted, 'report re-analyzed with the new category', `E2E Things in report=${sorted}`);
+
+// Transfer rules: make one for an unknown transfer, to a new person.
+await page.click('#config-open');
+await page.waitForSelector('.cfg-h3-btns');
+await clickText('.cfg-h3-btns button', 'Categories & rules');
+await page.waitForSelector('.ru-box');
+await page.$eval('.ru-tab[data-tab="transfers"]', (b) => b.click());
+const unknown0 = await page.$eval('.ru-stats', (e) => +/(\d+) unknown/.exec(e.textContent.replace(/\s+/g, ' '))[1]);
+await page.$$eval('.ru-body table tbody tr', (rs) => rs.find((r) => /BIG BERTHA BOT/.test(r.textContent)).querySelector('button').click());
+await page.waitForSelector('.ru-maker');
+const sugg = await page.$eval('.ru-maker-text', (i) => i.value);
+await page.$eval('.ru-maker select[aria-label="Where the money went"]', (s) => { s.value = '+new'; s.dispatchEvent(new Event('change')); });
+await page.waitForFunction(() => /would be sorted differently/.test(document.querySelector('.ru-maker .mg-verdict').textContent), { timeout: 15000 });
+const tv = await page.$eval('.ru-maker .mg-verdict', (e) => e.textContent);
+await clickText('.ru-maker .map-actions button', 'Apply');
+await page.waitForFunction(() => !document.querySelector('.ru-maker'));
+const trAfter = await page.evaluate(() => ({ stats: document.querySelector('.ru-stats').textContent.replace(/\s+/g, ' '),
+  first: document.querySelector('.ru-rules li .ru-rule')?.textContent, firstTo: document.querySelector('.ru-rules li select')?.value }));
+const unknown1 = +/(\d+) unknown/.exec(trAfter.stats)[1];
+step(sugg === 'BIG BERTHA BOT' && /24 transactions would be sorted differently/.test(tv) && unknown1 === unknown0 - 24 && trAfter.firstTo === 'Big Bertha Bot',
+  'transfer rule from an unknown transfer, to a new person, tried first', JSON.stringify({ sugg, tv, unknown0, unknown1, firstTo: trAfter.firstTo }));
+await shot('rules-transfers');
+// Categories tab: find our category, remove its text (undo-able), see the change summary.
+await page.$eval('.ru-tab[data-tab="categories"]', (b) => b.click());
+await page.type('.ru-search', 'E2E');
+await page.waitForFunction(() => document.querySelector('.ru-cat[data-category="E2E Things"] .ru-chip'));
+const chipN = await page.$eval('.ru-cat[data-category="E2E Things"] .ru-chip .ru-n', (n) => +n.textContent);
+await page.$eval('.ru-cat[data-category="E2E Things"] .ru-x', (b) => b.click());
+await page.waitForFunction(() => /sorted differently/.test(document.querySelector('.ru-changes summary').textContent));
+const chg = await page.$eval('.ru-changes summary', (s) => s.textContent);
+await clickText('.ru-box > .map-actions button', '↶ Undo');
+await page.waitForFunction(() => document.querySelector('.ru-cat[data-category="E2E Things"] .ru-chip'));
+step(chipN > 0 && /sorted differently/.test(chg), 'categories tab: per-text counts, removing text shows what changes, undo', JSON.stringify({ chipN, chg }));
+await shot('rules-categories');
+// Editing keeps the open category open (no search driving it) and stays on the tab.
+await page.$eval('.ru-search', (i) => { i.value = ''; i.dispatchEvent(new Event('input')); });
+await page.waitForFunction(() => !document.querySelector('.ru-cat[data-category="E2E Things"]')?.open);
+await page.$eval('.ru-cat[data-category="E2E Things"] > summary', (s) => s.click());
+await page.$eval('.ru-cat[data-category="E2E Things"] .ru-add', (i) => { i.focus(); i.value = 'E2E NEVER MATCHES'; });
+await page.keyboard.press('Enter');
+await page.waitForFunction(() => [...document.querySelectorAll('.ru-cat[data-category="E2E Things"] .ru-chip')].some((c) => /E2E NEVER MATCHES/.test(c.textContent)));
+await page.$$eval('.ru-cat[data-category="E2E Things"] .ru-chip', (cs) => cs.find((c) => /E2E NEVER MATCHES/.test(c.textContent)).querySelector('.ru-x').click());
+await sleep(300);
+const kept = await page.evaluate(() => ({ open: document.querySelector('.ru-cat[data-category="E2E Things"]')?.open,
+  tab: document.querySelector('.ru-tab.active')?.dataset.tab, chips: document.querySelectorAll('.ru-cat[data-category="E2E Things"] .ru-chip').length }));
+step(kept.open === true && kept.tab === 'categories' && kept.chips === 1, 'add/remove text keeps the category open and the tab', JSON.stringify(kept));
+// Click a text's chip: edit it on the list of what it catches; untick the biggest → an amount range.
+await page.$eval('.ru-cat[data-category="E2E Things"] .ru-chip-t', (b) => b.click());
+await page.waitForSelector('.ru-maker .ru-list tbody tr.ru-li');
+await clickText('.ru-maker .ru-sorth', 'Amount');
+await page.$eval('.ru-maker .ru-list tbody tr.ru-li input[type=checkbox]', (c) => c.click());
+await page.waitForFunction(() => /would be sorted differently/.test(document.querySelector('.ru-maker .mg-verdict').textContent), { timeout: 15000 });
+const rg = await page.evaluate(() => ({ title: document.querySelector('.ru-maker h3').textContent, hi: document.querySelector('.ru-maker input[aria-label="Largest amount"]').value,
+  verdict: document.querySelector('.ru-maker .mg-verdict').textContent, unticked: [...document.querySelectorAll('.ru-list tbody tr.ru-li input')].filter((c) => !c.checked).length }));
+await page.$eval('.ru-maker .ru-li', (r) => r.click());
+const det = await page.$eval('.ru-maker .ru-detail', (d) => d.textContent);
+await shot('rules-edit-text');
+await clickText('.ru-maker .map-actions button', 'Apply');
+await page.waitForFunction(() => !document.querySelector('.ru-maker'));
+const rgChip = await page.$eval('.ru-cat[data-category="E2E Things"] .ru-chip', (c) => c.textContent);
+step(/^Edit “BLACKJACK PALACE”/.test(rg.title) && +rg.hi > 0 && rg.unticked === 1 && /^1 transaction would be sorted differently/.test(rg.verdict) && /Bank wording/.test(det) && /up to/.test(rgChip),
+  'edit a text from its chip: untick the biggest → its own amount range', JSON.stringify({ ...rg, rgChip }));
+await clickText('.ru-box > .map-actions button', '↶ Undo');
+await clickText('.ru-box .map-head button', '? Help');
+const helpTxt = await page.$eval('.ru-help', (e) => e.textContent);
+step(/longest text wins/.test(helpTxt) && /Rust/.test(helpTxt) && /own range/.test(helpTxt), 'help explains matching, advanced settings and the regex syntax', helpTxt.slice(0, 80));
+await clickText('.ru-box .map-head button', '? Hide help');
+await clickText('.ru-box > .map-actions button', 'Save');
+await page.waitForFunction(() => !document.querySelector('.ru-box'));
+const files = await page.evaluate(() => new Promise((res) => {
+  const rq = indexedDB.open('wdmg-projects');
+  rq.onsuccess = () => {
+    const all = rq.result.transaction('projects').objectStore('projects').getAll();
+    all.onsuccess = () => {
+      const d = all.result.find((x) => /Demo/.test(x.name));
+      const get = (n) => new TextDecoder().decode(d.files.find((f) => f.name === n).bytes);
+      res({ cat: get('categories.toml'), ppl: get('people.toml') });
+    };
+  };
+}));
+step(/PLAYGROUND categories/.test(files.cat) && /name = "E2E Things"/.test(files.cat) && /id = "Big Bertha Bot"/.test(files.ppl) && /to = "Big Bertha Bot"/.test(files.ppl) && /PLAYGROUND household/.test(files.ppl),
+  'saved into categories.toml / people.toml with their comments', `${files.cat.length}+${files.ppl.length} bytes`);
+
+// "Only this one": pin a single transaction from the Transactions window.
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }).catch(() => {}), page.click('#config-close')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+if (await page.$eval('#txwin', (w) => w.hidden)) { await page.$eval('#txwin-dock', (b) => b.click()); await sleep(600); }
+const pinMer = await page.$$eval('#txwin tbody tr', (rs) => { const r = rs.find((x) => x.querySelector('.tw-cat')); r.querySelector('.tw-cat').click(); return r.querySelector('.mer').textContent; });
+await page.waitForSelector('.ru-maker');
+await page.$eval('.ru-maker input[name="ru-scope"][value="pins"]', (r) => { r.checked = true; r.dispatchEvent(new Event('change')); });
+await page.$eval('.ru-target', (s) => { s.value = [...s.options].find((o) => o.value && o.value !== '+new' && !o.selected).value; s.dispatchEvent(new Event('change')); });
+await page.waitForFunction(() => /would be sorted differently/.test(document.querySelector('.ru-maker .mg-verdict').textContent), { timeout: 15000 });
+const pv = await page.evaluate(() => ({ verdict: document.querySelector('.ru-maker .mg-verdict').textContent, ticked: [...document.querySelectorAll('.ru-list tbody tr.ru-li input')].filter((c) => c.checked).length, rangeHidden: document.querySelector('.ru-range').hidden }));
+await Promise.all([page.waitForNavigation({ waitUntil: 'load' }), clickText('.ru-maker .map-actions button', 'Apply & save')]);
+await page.waitForFunction(() => !document.getElementById('report-root').hidden, { timeout: 30000 });
+const pinCat = await page.evaluate(() => new Promise((res) => {
+  const rq = indexedDB.open('wdmg-projects');
+  rq.onsuccess = () => {
+    const all = rq.result.transaction('projects').objectStore('projects').getAll();
+    all.onsuccess = () => {
+      const d = all.result.find((x) => /Demo/.test(x.name));
+      res(new TextDecoder().decode(d.files.find((f) => f.name === 'categories.toml').bytes));
+    };
+  };
+}));
+step(/^1 transaction would be sorted differently/.test(pv.verdict) && pv.ticked === 1 && pv.rangeHidden && /\[\[pin\]\]/.test(pinCat) && /PLAYGROUND categories/.test(pinCat),
+  '“Only this one” pins a single transaction (saved as [[pin]])', JSON.stringify({ pinMer, pv, pin: pinCat.slice(pinCat.indexOf('[[pin]]'), pinCat.indexOf('[[pin]]') + 160) }));
+
+// Hovering an unusual-activity tag on the chart's top rail explains it.
+if (!(await page.$eval('#txwin', (w) => w.hidden))) { await page.click('#txwin .fw-min'); await sleep(700); }
+const over = await page.evaluate(() => {
+  const o = [...document.querySelectorAll('.u-over')].find((x) => x.getBoundingClientRect().width > 100);
+  o.scrollIntoView({ block: 'center' }); const r = o.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width };
+});
+await sleep(200);
+let tipTxt = '';
+for (let x = over.x + 2; x < over.x + over.w && !tipTxt; x += 3) {
+  await page.mouse.move(x, over.y + 3);
+  tipTxt = await page.evaluate(() => { const t = document.getElementById('anom-tip'); return t && !t.hidden ? t.textContent : ''; });
+}
+await shot('06-anom-tip');
+step(/(High|Medium|Low) · /.test(tipTxt) && /Unusual activity/.test(tipTxt), 'hovering a chart tag says what the flag is', tipTxt.slice(0, 140));
+
 } catch (e) {
   failed++;
   console.log('FAIL | aborted |', e.message.split('\n')[0]);

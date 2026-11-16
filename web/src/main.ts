@@ -7,6 +7,7 @@ import { fileText, getActiveId, getProject, INSIGHTS_NAME, type ProjectDoc } fro
 import { runReport } from './report.js';
 import { drawChangePoints, initCpControls } from './cpview';
 import { openConfig } from './config';
+import { openRulesEditor, type RuleExample } from './rules';
 import { openPeopleEditor } from './people';
 import { saveProject } from './store';
 import { initYank } from './yank';
@@ -88,8 +89,24 @@ function editPeopleFrom(doc: ProjectDoc, focus?: string) {
   });
 }
 
+/** Open Categories & rules from the report (optionally on one transaction); a save re-analyzes. */
+function editRulesFrom(doc: ProjectDoc, example?: RuleExample) {
+  openRulesEditor(doc, { example }).then(async (saved) => {
+    if (saved) { await saveProject(doc); location.reload(); }
+  });
+}
+
 function renderNotices(res: AnalyzeResult | null, extra: (string | Node)[], doc?: ProjectDoc) {
   const msgs: (string | Node)[] = [...extra];
+  // Spending/income no category rule matched: offer to sort it.
+  const unsorted = (res?.analysis?.transactions || []).filter((t: any) => t.kind !== 'transfer' && (!t.category || t.category === 'Uncategorized')).length;
+  if (unsorted && doc) {
+    const line = el('div', 'notice-row');
+    const b = el('button', 'btn small active', 'Sort them…');
+    b.addEventListener('click', () => editRulesFrom(doc));
+    line.append(`${unsorted.toLocaleString()} transaction${unsorted === 1 ? ' isn’t' : 's aren’t'} in any category yet. `, b);
+    msgs.push(line);
+  }
   // Rows no account in people.toml claims: offer to assign them right here.
   const orphans = (res?.analysis?.transactions || []).filter((t: any) => t.account === 'unassigned').length;
   if (orphans && doc) {
@@ -161,6 +178,7 @@ async function boot() {
   api = runReport({ analysis: res.analysis, insights }, {
     projectId: doc.id, drawChangePoints,
     onEditPeople: (focus?: string) => editPeopleFrom(doc, focus),
+    onCategorise: (ex: RuleExample) => editRulesFrom(doc, ex),
   });
   initYank($('report-root'));
 }

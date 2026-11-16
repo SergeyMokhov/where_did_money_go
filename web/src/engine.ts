@@ -116,7 +116,11 @@ export type PeopleOp =
   | { op: 'set_match'; account: string; filename?: string | null; profile?: string | null; cardholder?: string | null; card_last4?: string | null }
   | { op: 'make_external'; account: string }
   | { op: 'delete_account'; account: string }
-  | { op: 'delete_person'; person: string };
+  | { op: 'delete_person'; person: string }
+  | { op: 'add_rule'; pattern: string; to: string; priority?: number }
+  | { op: 'update_rule'; index: number; pattern: string; to: string }
+  | { op: 'delete_rule'; index: number }
+  | { op: 'order_rules'; order: number[] };
 
 /** The project's people.toml, or the built-in default when it has none. */
 export function peopleText(doc: ProjectDoc): string {
@@ -128,4 +132,53 @@ export function parsePeople(text: string): PeopleDoc {
 /** Apply edits with the engine (comments and layout in the file are kept). Throws on a bad edit. */
 export function editPeople(text: string, ops: PeopleOp[]): string {
   return wasm.edit_people(text, JSON.stringify(ops));
+}
+
+// ---------- rule editors (categories + transfer rules) ----------
+export interface LabRow {
+  date: string; amount: string; account: string; merchant: string; raw: string; file: string;
+  kind: 'spend' | 'income' | 'transfer' | 'unknown';
+  category: string | null; subcategory: string | null;
+  /** The rule that sorted it; `pinned` = a [[pin]] for this very transaction (pattern ''). */
+  hit: { category: string; subcategory: string; pattern: string; pinned?: boolean } | null;
+  transfer: { how: 'paired' | 'rule' | 'unmatched'; other: string | null; rule: number | null } | null;
+}
+export type CategoryKind = 'spend' | 'income' | 'transfer';
+export interface LabSub {
+  name: string; patterns: string[]; amount_min: string | null; amount_max: string | null; priority: number;
+  /** Patterns with their own amount range (replacing the subcategory's). */
+  ranged: { pattern: string; amount_min: string | null; amount_max: string | null }[];
+  source: 'builtin' | 'changed' | 'yours' | 'off';
+}
+export interface LabCategory { name: string; kind: CategoryKind; subs: LabSub[] }
+export interface Lab {
+  rows: LabRow[]; categories: LabCategory[];
+  /** Transfer rules in file order (`rows[].transfer.rule` indexes this). */
+  rules: { pattern: string; to: string; priority: number }[];
+  targets: string[];
+}
+/** Every row with the rule behind its category / transfer, plus the layered rules. */
+export function ruleLab(files: { name: string; bytes: Uint8Array }[], config: Record<string, string>): Lab {
+  return JSON.parse(wasm.rule_lab(files, JSON.stringify(config)));
+}
+/** A pattern's own amount range (absolute amounts, inclusive; null/'' = no limit). */
+export interface AmountRange { amount_min?: string | null; amount_max?: string | null }
+export type CategoryOp =
+  | { op: 'add_pattern'; category: string; subcategory: string; pattern: string; kind?: CategoryKind; range?: AmountRange }
+  | { op: 'edit_pattern'; category: string; subcategory: string; from: string; pattern: string; range?: AmountRange }
+  | { op: 'remove_pattern'; category: string; subcategory: string; pattern: string }
+  | { op: 'add_subcategory'; category: string; subcategory: string; kind?: CategoryKind }
+  | { op: 'set_amounts'; category: string; subcategory: string; amount_min?: string | null; amount_max?: string | null }
+  | { op: 'set_priority'; category: string; subcategory: string; priority: number }
+  | { op: 'set_kind'; category: string; kind: CategoryKind }
+  | { op: 'rename_category'; from: string; to: string }
+  | { op: 'rename_subcategory'; category: string; from: string; to: string }
+  | { op: 'move_subcategory'; category: string; subcategory: string; to_category: string }
+  | { op: 'delete_subcategory'; category: string; subcategory: string }
+  | { op: 'delete_category'; category: string }
+  | { op: 'pin'; date: string; amount: string; description: string; category: string; subcategory: string; kind?: CategoryKind }
+  | { op: 'unpin'; date: string; amount: string; description: string };
+/** Edit the user's categories.toml ('' = none yet), layered over built-in + learned. */
+export function editCategories(userText: string, config: Record<string, string>, ops: CategoryOp[]): string {
+  return wasm.edit_categories(userText, JSON.stringify(config), JSON.stringify(ops));
 }

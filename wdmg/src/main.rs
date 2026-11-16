@@ -394,6 +394,7 @@ fn cmd_add_rule(
                 amount_min: None,
                 amount_max: None,
                 priority: 0,
+                ranged: Vec::new(),
             });
             cat.subcategories
                 .last_mut()

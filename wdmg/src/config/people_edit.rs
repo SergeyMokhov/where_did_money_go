@@ -115,6 +115,39 @@ pub enum PeopleOp {
         /// Person id.
         person: String,
     },
+    /// Add a transfer rule: an unpaired transfer whose description matches
+    /// `pattern` goes to `to` (a person or account). It's tried after the
+    /// existing rules unless `priority` says otherwise.
+    AddRule {
+        /// Case-insensitive regex on the description.
+        pattern: String,
+        /// Person or account id.
+        to: String,
+        /// Explicit priority (higher is tried first).
+        #[serde(default)]
+        priority: Option<i32>,
+    },
+    /// Change a transfer rule (by its position in the file).
+    UpdateRule {
+        /// Index among the `[[transfer_rule]]` tables, in file order.
+        index: usize,
+        /// New pattern.
+        pattern: String,
+        /// New target.
+        to: String,
+    },
+    /// Delete a transfer rule (by its position in the file).
+    DeleteRule {
+        /// Index among the `[[transfer_rule]]` tables, in file order.
+        index: usize,
+    },
+    /// Put the rules in the order they should be tried: `order` lists every
+    /// file index once, first-tried first. The tables are reordered and their
+    /// priorities rewritten to descend in that order.
+    OrderRules {
+        /// A permutation of the file indices.
+        order: Vec<usize>,
+    },
 }
 
 /// The keys that decide which statement rows an account picks up.
@@ -505,8 +538,109 @@ fn apply_one(doc: &mut DocumentMut, op: &PeopleOp) -> Result<(), PeopleEditError
             }
             drop_rules_to(doc, person);
         }
+        PeopleOp::AddRule {
+            pattern,
+            to,
+            priority,
+        } => {
+            let (pattern, to) = check_rule(doc, pattern, to)?;
+            // Default: tried after every existing rule.
+            let prio = priority.unwrap_or_else(|| {
+                doc.get("transfer_rule")
+                    .and_then(Item::as_array_of_tables)
+                    .into_iter()
+                    .flat_map(ArrayOfTables::iter)
+                    .filter_map(|r| r.get("priority").and_then(Item::as_integer))
+                    .min()
+                    .map_or(0, |m| i32::try_from(m).unwrap_or(0).min(0))
+            });
+            let mut t = Table::new();
+            t["pattern"] = value(pattern);
+            t["to"] = value(to);
+            t["priority"] = value(i64::from(prio));
+            rules_mut(doc).push(t);
+        }
+        PeopleOp::UpdateRule { index, pattern, to } => {
+            let (pattern, to) = check_rule(doc, pattern, to)?;
+            let r = rule_at(doc, *index)?;
+            r["pattern"] = value(pattern);
+            r["to"] = value(to);
+        }
+        PeopleOp::DeleteRule { index } => {
+            rule_at(doc, *index)?;
+            let rules = rules_mut(doc);
+            rules.remove(*index);
+            if rules.is_empty() {
+                doc.remove("transfer_rule");
+            }
+        }
+        PeopleOp::OrderRules { order } => {
+            let rules = rules_mut(doc);
+            let n = rules.len();
+            let mut seen = vec![false; n];
+            if order.len() != n
+                || order
+                    .iter()
+                    .any(|&i| i >= n || std::mem::replace(&mut seen[i], true))
+            {
+                return Err(PeopleEditError::Invalid(
+                    "the new order must list every rule exactly once".into(),
+                ));
+            }
+            let mut tables: Vec<Option<Table>> = rules.iter().cloned().map(Some).collect();
+            let mut next = ArrayOfTables::new();
+            for (rank, &i) in order.iter().enumerate() {
+                if let Some(mut t) = tables[i].take() {
+                    let prio = i64::try_from((n - rank) * 10).unwrap_or(i64::MAX);
+                    t["priority"] = value(prio);
+                    next.push(t);
+                }
+            }
+            *rules = next;
+        }
     }
     Ok(())
+}
+
+fn rules_mut(doc: &mut DocumentMut) -> &mut ArrayOfTables {
+    if !doc.contains_key("transfer_rule") {
+        doc.insert("transfer_rule", Item::ArrayOfTables(ArrayOfTables::new()));
+    }
+    // INVARIANT: ensured above; a non-array `transfer_rule` fails `check_shape`.
+    #[allow(clippy::expect_used)]
+    doc["transfer_rule"]
+        .as_array_of_tables_mut()
+        .expect("transfer_rule is an array of tables")
+}
+
+/// A rule's pattern must compile; its target must be a person or account.
+fn check_rule(
+    doc: &DocumentMut,
+    pattern: &str,
+    to: &str,
+) -> Result<(String, String), PeopleEditError> {
+    let pattern = clean(pattern, "a rule's pattern")?;
+    regex::Regex::new(&pattern).map_err(|e| {
+        PeopleEditError::Invalid(format!("the pattern {pattern:?} isn't valid: {e}"))
+    })?;
+    let to = clean(to, "a rule's target")?;
+    if !all_person_ids(doc).contains(&to) && !all_account_ids(doc).contains(&to) {
+        return Err(PeopleEditError::NotFound {
+            kind: "person or account",
+            id: to,
+        });
+    }
+    Ok((pattern, to))
+}
+
+fn rule_at(doc: &mut DocumentMut, index: usize) -> Result<&mut Table, PeopleEditError> {
+    doc.get_mut("transfer_rule")
+        .and_then(Item::as_array_of_tables_mut)
+        .and_then(|r| r.get_mut(index))
+        .ok_or_else(|| PeopleEditError::NotFound {
+            kind: "transfer rule",
+            id: format!("#{}", index + 1),
+        })
 }
 
 /// Remove the transfer rules whose `to` is `id` (they would point at nothing).
@@ -955,6 +1089,75 @@ to       = "chequing"
             ),
             Err(PeopleEditError::NotFound { .. })
         ));
+    }
+
+    #[test]
+    fn transfer_rules_add_update_order_delete() {
+        let out = run(&[PeopleOp::AddRule {
+            pattern: "(?i)to card".into(),
+            to: "card".into(),
+            priority: None,
+        }]);
+        let d = doc(&out);
+        assert_eq!(d.transfer_rules.len(), 3);
+        assert_eq!(d.transfer_rules[2].to, "card");
+        assert!(
+            d.transfer_rules[2].priority
+                <= d.transfer_rules.iter().map(|r| r.priority).min().unwrap()
+        );
+        // Unknown target / bad regex are refused.
+        for (pattern, to) in [("x", "nobody"), ("(bad", "card")] {
+            assert!(apply(
+                &out,
+                &[PeopleOp::AddRule {
+                    pattern: pattern.into(),
+                    to: to.into(),
+                    priority: None
+                }]
+            )
+            .is_err());
+        }
+        // Order: last first. Priorities descend in the new order; comments travel.
+        let out = apply(
+            &out,
+            &[PeopleOp::OrderRules {
+                order: vec![2, 0, 1],
+            }],
+        )
+        .unwrap();
+        let d = doc(&out);
+        assert_eq!(
+            d.transfer_rules
+                .iter()
+                .map(|r| r.to.as_str())
+                .collect::<Vec<_>>(),
+            ["card", "partner", "chequing"]
+        );
+        assert!(d
+            .transfer_rules
+            .windows(2)
+            .all(|w| w[0].priority > w[1].priority));
+        assert!(out.contains("# Spouse transfers."));
+        assert!(apply(
+            &out,
+            &[PeopleOp::OrderRules {
+                order: vec![0, 0, 1]
+            }]
+        )
+        .is_err());
+        let out = apply(
+            &out,
+            &[PeopleOp::UpdateRule {
+                index: 0,
+                pattern: "CARD PMT".into(),
+                to: "me".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(doc(&out).transfer_rules[0].pattern, "CARD PMT");
+        let out = apply(&out, &[PeopleOp::DeleteRule { index: 0 }]).unwrap();
+        assert_eq!(doc(&out).transfer_rules.len(), 2);
+        assert!(apply(&out, &[PeopleOp::DeleteRule { index: 5 }]).is_err());
     }
 
     #[test]
